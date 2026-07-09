@@ -1,0 +1,581 @@
+/* ---------- Gomulu font (JetBrains Mono — OFL; SF Mono/Menlo telifli oldugu icin
+   en yakin serbest muadil). Boylece her Windows makinesinde ayni gorunum. ---------- */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/JetBrainsMono-Regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('fonts/JetBrainsMono-Bold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/JetBrainsMono-Italic.woff2') format('woff2');
+}
+
+:root {
+  /* macOS Terminal "Pro" temasina yakin palet */
+  --bg: rgba(30, 30, 30, 0.82);
+  --bg-solid: #1e1e1e;
+  --fg: #f2f2f2;
+  --titlebar-bg: rgba(58, 58, 60, 0.62);
+  --tabbar-bg: rgba(42, 42, 44, 0.55);
+  --tab-active-bg: rgba(255, 255, 255, 0.10);
+  --tab-inactive-fg: #a5a5a7;
+  --border: rgba(255, 255, 255, 0.08);
+  --divider: rgba(255, 255, 255, 0.07);
+
+  --tl-red: #ff5f56;
+  --tl-yellow: #ffbd2e;
+  --tl-green: #27c93f;
+  --tl-blurred: #56565a; /* odak disi: griye doner (macOS imzasi) */
+
+  /* SF Mono / Menlo varsa kullanilir; yoksa gomulu JetBrains Mono; sonra sistem mono */
+  --font-mono: 'SF Mono', 'Menlo', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  --font-ui: -apple-system, 'Segoe UI', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  overflow: hidden;
+  border-radius: 10px; /* macOS pencere kosesi */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: opacity 200ms ease;
+}
+/* Pencere odak disindayken macOS gibi hafif soner */
+body.blurred { opacity: 0.96; }
+body.blurred #window-title { opacity: 0.4; }
+
+/* Maximize/tam ekranda yuvarlak kose ve cerceve olmaz (macOS zoom gibi) */
+body.maximized,
+body.maximized #titlebar {
+  border-radius: 0;
+}
+body.maximized { border: none; }
+html:has(body.maximized) { border-radius: 0; }
+
+/* ---------- Titlebar (traffic-light + ortalanmis baslik) ---------- */
+#titlebar {
+  position: relative;
+  height: 36px;
+  flex: 0 0 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: var(--titlebar-bg);
+  -webkit-app-region: drag; /* pencereyi surukleme alani */
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+
+#traffic-lights {
+  display: flex;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+  z-index: 2;
+}
+
+.tl {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+  opacity: 0.95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: filter 120ms ease, opacity 120ms ease, background 160ms ease;
+}
+.tl:hover { opacity: 1; filter: brightness(1.1); }
+.tl-red { background: var(--tl-red); }
+.tl-yellow { background: var(--tl-yellow); }
+.tl-green { background: var(--tl-green); }
+
+/* macOS imzasi: traffic-light kumesine gelince ×/−/+ sembolleri belirir */
+.tl::before {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+#traffic-lights:hover .tl::before { opacity: 1; }
+.tl-red::before    { content: '\00d7'; } /* × kapat */
+.tl-yellow::before { content: '\2212'; } /* − kucult */
+.tl-green::before  { content: '\002b'; font-size: 8px; } /* + buyut */
+
+/* Odak disinda hepsi griye doner ve semboller gizlenir (macOS) */
+body.blurred .tl { background: var(--tl-blurred); }
+body.blurred #traffic-lights:hover .tl::before { opacity: 0; }
+
+/* Ortalanmis, surukleme yapilabilir dinamik pencere basligi */
+#window-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 60%;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none; /* tiklama titlebar'a (surukleme) gitsin */
+  transition: opacity 200ms ease;
+}
+
+#btn-new-tab {
+  -webkit-app-region: no-drag;
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--tab-inactive-fg);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  transition: background 140ms ease, color 140ms ease;
+}
+#btn-new-tab:hover { background: var(--tab-active-bg); color: var(--fg); }
+
+#btn-settings {
+  -webkit-app-region: no-drag;
+  background: transparent;
+  border: none;
+  color: var(--tab-inactive-fg);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  transition: background 140ms ease, color 140ms ease;
+}
+#btn-settings:hover { background: var(--tab-active-bg); color: var(--fg); }
+
+/* ---------- Sekme cubugu (macOS: ayri satir, 2+ sekmede gorunur) ---------- */
+#tabbar {
+  display: none;
+  flex: 0 0 30px;
+  height: 30px;
+  background: var(--tabbar-bg);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: no-drag;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+body.multi-tab #tabbar { display: flex; }
+
+.tab {
+  flex: 1 1 0;
+  min-width: 90px;
+  max-width: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 26px;
+  position: relative;
+  font-size: 12px;
+  color: var(--tab-inactive-fg);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  border-right: 1px solid var(--divider);
+  transition: background 160ms ease, color 160ms ease;
+  animation: tab-in 180ms ease-out;
+}
+.tab:last-child { border-right: none; }
+.tab.active {
+  background: var(--tab-active-bg);
+  color: var(--fg);
+}
+
+.tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* macOS: kapat butonu solda, hover'da belirir */
+.tab .tab-close {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 140ms ease, background 140ms ease;
+}
+.tab:hover .tab-close { opacity: 0.65; }
+.tab .tab-close:hover { opacity: 1; background: rgba(255, 255, 255, 0.14); }
+
+/* ---------- Terminal alani ---------- */
+#panes {
+  flex: 1;
+  position: relative;
+  padding: 6px 10px 10px 10px;
+  overflow: hidden;
+}
+
+.pane {
+  position: absolute;
+  inset: 6px 10px 10px 10px;
+  display: none;
+}
+.pane.active { display: block; animation: pane-in 140ms ease-out; }
+
+/* xterm.js varsayilan konteynerine tam yukseklik/genislik ver */
+.xterm-wrapper {
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------- macOS tarzi ince, ustten-binen (overlay) scrollbar ----------
+   macOS'ta oldugu gibi yalnizca KAYDIRIRKEN gorunur (JS 'scrolling' sinifini
+   ekler, ~900ms sonra kaldirir), diger zamanlarda tamamen gorunmez. */
+.xterm .xterm-viewport::-webkit-scrollbar { width: 9px; }
+.xterm .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+.xterm .xterm-viewport::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.xterm .xterm-viewport.scrolling::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: content-box;
+}
+.xterm .xterm-viewport.scrolling::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.42);
+  background-clip: content-box;
+}
+
+/* ---------- Animasyonlar (macOS Terminal hissi) ---------- */
+@keyframes tab-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes pane-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes window-in {
+  from { opacity: 0; transform: scale(0.985); }
+  to   { opacity: 1; transform: scale(1); }
+}
+/* Pencere acilisinda hafif olcek + fade (macOS uygulama acilis hissi) */
+body { animation: window-in 160ms ease-out; }
+
+/* ---------- Kabuk secme menusu (+ dugmesine sag tik; macOS context menu tarzi) ---------- */
+#shell-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 150px;
+  padding: 4px;
+  background: rgba(50, 50, 52, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: #f2f2f2;
+  animation: pane-in 120ms ease-out;
+}
+#shell-menu[hidden] { display: none; }
+.shell-menu-item {
+  padding: 5px 14px;
+  border-radius: 5px;
+  cursor: default;
+  white-space: nowrap;
+}
+.shell-menu-item:hover { background: #3478f6; color: #fff; }
+
+/* ---------- Acik (light) profiller: pencere kromu macOS acik gorunumune doner ----------
+   (Basic, Man Page, Novel, Silver Aerogel, Solid Colors gibi acik zeminli profillerde
+   koyu titlebar/sekme cubugu sirit gibi durur; macOS acik tema degerlerine geceriz) */
+body.light-theme {
+  --fg: #1d1d1f;
+  --titlebar-bg: rgba(236, 236, 238, 0.86);
+  --tabbar-bg: rgba(226, 226, 228, 0.80);
+  --tab-active-bg: rgba(0, 0, 0, 0.08);
+  --tab-inactive-fg: #6e6e70;
+  --border: rgba(0, 0, 0, 0.12);
+  --divider: rgba(0, 0, 0, 0.10);
+  --tl-blurred: #c9c9cd;
+}
+body.light-theme .xterm .xterm-viewport.scrolling::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.32);
+  background-clip: content-box;
+}
+body.light-theme .xterm .xterm-viewport.scrolling::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.48);
+  background-clip: content-box;
+}
+
+/* ---------- Ayarlar paneli (macOS Terminal Settings / Cmd+, muadili) ---------- */
+#settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  animation: pane-in 140ms ease-out;
+}
+#settings-overlay[hidden] { display: none; }
+
+#settings-panel {
+  width: 480px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 72px);
+  display: flex;
+  flex-direction: column;
+  background: rgba(44, 44, 46, 0.97);
+  color: #f2f2f2;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  animation: window-in 160ms ease-out;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  height: 40px;
+  flex: 0 0 40px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+}
+#settings-close {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #a5a5a7;
+  font-size: 15px;
+  cursor: pointer;
+}
+#settings-close:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+
+.settings-body { overflow-y: auto; padding: 14px 18px 18px; }
+.settings-section + .settings-section { margin-top: 18px; }
+.settings-section h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9a9a9e;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 0;
+}
+.hint { margin: 4px 0 0; font-size: 11px; color: #86868b; }
+
+/* Profil kartlari: mini onizleme + ad (Terminal.app profil galerisi gibi) */
+#profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+}
+.profile-card {
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 4px;
+  border: 2px solid transparent;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.profile-card:hover { background: rgba(255, 255, 255, 0.06); }
+.profile-card.selected { border-color: #3478f6; } /* macOS mavi secim halkasi */
+.profile-preview {
+  height: 58px;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  white-space: pre;
+}
+.profile-name {
+  margin-top: 5px;
+  text-align: center;
+  font-size: 11px;
+  color: #d5d5d7;
+}
+
+/* Opaklik kaydiricisi (macOS Terminal profil "Opacity" ayari) */
+.opacity-controls { display: flex; align-items: center; gap: 8px; }
+#opacity-slider {
+  -webkit-appearance: none;
+  width: 140px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.22);
+  outline: none;
+}
+#opacity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+#opacity-value {
+  min-width: 40px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #d5d5d7;
+}
+#opacity-reset {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #d5d5d7;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+#opacity-reset:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+
+/* Stepper (yazi boyutu) */
+.stepper { display: flex; align-items: center; gap: 4px; }
+.stepper button {
+  width: 24px; height: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #f2f2f2;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.stepper button:hover { background: rgba(255, 255, 255, 0.14); }
+.stepper span { min-width: 34px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* Segmented control (imlec stili) */
+.segmented {
+  display: inline-flex;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.segmented button {
+  width: 36px; height: 26px;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  color: #d5d5d7;
+  font-size: 12px;
+  cursor: pointer;
+}
+.segmented button + button { border-left: 1px solid rgba(255, 255, 255, 0.12); }
+.segmented button.selected { background: #3478f6; color: #fff; }
+.segmented button.disabled { opacity: 0.4; cursor: not-allowed; }
+/* Metin etiketli segmentler (cam efekti) sabit genisligi asar */
+#glass-mode button { width: auto; padding: 0 12px; }
+
+/* macOS tarzi acma/kapama anahtari */
+.switch { position: relative; display: inline-block; width: 38px; height: 22px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .knob {
+  position: absolute; inset: 0;
+  background: rgba(120, 120, 128, 0.4);
+  border-radius: 11px;
+  transition: background 160ms ease;
+}
+.switch .knob::before {
+  content: '';
+  position: absolute;
+  width: 18px; height: 18px;
+  left: 2px; top: 2px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 160ms ease;
+}
+.switch input:checked + .knob { background: #34c759; } /* macOS yesili */
+.switch input:checked + .knob::before { transform: translateX(16px); }
+
+/* Kabuk secimi */
+#set-shell {
+  background: rgba(255, 255, 255, 0.07);
+  color: #f2f2f2;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+#set-shell option { background: #2c2c2e; }
+
+/* Erisilebilirlik: kullanici hareket azaltma isterse tum animasyonlari kapat */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

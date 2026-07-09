@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Terminal</title>
+  <link rel="stylesheet" href="../node_modules/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="single-tab">
+  <!-- Title bar: traffic lights (left) + centered dynamic title + new tab (right) -->
+  <div id="titlebar">
+    <div id="traffic-lights">
+      <button id="btn-close" class="tl tl-red" title="Close"></button>
+      <button id="btn-min" class="tl tl-yellow" title="Minimize"></button>
+      <button id="btn-max" class="tl tl-green" title="Zoom"></button>
+    </div>
+    <div id="window-title">Terminal</div>
+    <button id="btn-new-tab" title="New tab (Ctrl+T) — right-click to choose shell">+</button>
+    <button id="btn-settings" title="Settings (Ctrl+,)">&#9881;</button>
+  </div>
+
+  <!-- Tab bar: separate row like macOS; only visible with 2+ tabs -->
+  <div id="tabbar">
+    <!-- tabs are appended here by JS -->
+  </div>
+
+  <div id="panes">
+    <!-- one xterm container per tab, appended here by JS -->
+  </div>
+
+  <!-- Shell picker menu: right-click the + button (different shell per tab) -->
+  <div id="shell-menu" hidden></div>
+
+  <!-- Settings panel (equivalent of macOS Terminal "Settings" / Cmd+,).
+       All captions are (re)written at runtime by applyLanguage() — English here is
+       just the fallback before the i18n dictionary loads. -->
+  <div id="settings-overlay" hidden>
+    <div id="settings-panel">
+      <div class="settings-header">
+        <span id="settings-title">Settings</span>
+        <button id="settings-close" title="Close (Esc)">&#215;</button>
+      </div>
+      <div class="settings-body">
+        <div class="settings-section">
+          <h3 id="h3-profile">Profile</h3>
+          <div id="profile-grid"><!-- theme cards are appended here by JS --></div>
+          <div class="settings-row">
+            <label id="lbl-opacity">Opacity</label>
+            <div class="opacity-controls">
+              <input type="range" id="opacity-slider" min="0" max="100" step="1" />
+              <span id="opacity-value">100%</span>
+              <button id="opacity-reset" title="Reset to the profile's default opacity">Auto</button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label id="lbl-glass">Glass effect</label>
+            <div class="segmented" id="glass-mode">
+              <button data-glass="acrylic" title="Background shows through with a frosted blur (acrylic)">Blurred</button>
+              <button data-glass="clear" title="Background shows through crisply — changing this restarts the app">Clear</button>
+            </div>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3 id="h3-text">Text</h3>
+          <div class="settings-row">
+            <label id="lbl-fontsize">Font size</label>
+            <div class="stepper">
+              <button id="font-minus">&#8722;</button>
+              <span id="font-size-value">13</span>
+              <button id="font-plus">+</button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label id="lbl-cursor">Cursor</label>
+            <div class="segmented" id="cursor-style">
+              <button data-style="block" title="Block">&#9646;</button>
+              <button data-style="underline" title="Underline">&#9601;</button>
+              <button data-style="bar" title="Vertical bar">&#9615;</button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label id="lbl-blink">Blink cursor</label>
+            <label class="switch">
+              <input type="checkbox" id="cursor-blink" />
+              <span class="knob"></span>
+            </label>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3 id="h3-shell">Shell</h3>
+          <div class="settings-row">
+            <label id="lbl-shell">Default shell</label>
+            <select id="set-shell">
+              <option value="auto">Automatic (WSL if available)</option>
+            </select>
+          </div>
+          <p class="hint" id="shell-hint">Shell changes take effect in new tabs.</p>
+        </div>
+        <div class="settings-section">
+          <h3 id="h3-language">Language</h3>
+          <div class="settings-row">
+            <label id="lbl-language">Interface language</label>
+            <div class="segmented" id="lang-mode">
+              <button data-lang="tr">Türkçe</button>
+              <button data-lang="en">English</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js" type="module"></script>
+</body>
+</html>
