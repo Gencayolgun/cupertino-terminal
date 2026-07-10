@@ -34,7 +34,9 @@ jobs:
         run: npm ci
 
       - name: Build installer (electron-builder)
-        run: npm run dist
+        # --publish never: electron-builder yalnizca derlesin; yuklemeyi asagidaki
+        # softprops adimi (Release'e ekleme) yapar.
+        run: npm run dist -- --publish never
         env:
           # electron-builder'ın kod imzalamayı atlaması için (imzasız derleme)
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
