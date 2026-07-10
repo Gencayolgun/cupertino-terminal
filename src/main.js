@@ -32,6 +32,27 @@ app.setName('Cupertino Terminal');
 // Gorev cubugu gruplama/sabitleme kimligi (yoksa Windows uygulamayi "electron" sanir)
 app.setAppUserModelId('com.cupertinoterminal.app');
 
+// Varsayılan terminal olarak kaydet: terminal:// ve shell:// URL scheme'leri
+if (process.argv.includes('--register-default')) {
+  try {
+    app.setAsDefaultProtocolClient('terminal');
+    app.setAsDefaultProtocolClient('shell');
+    console.log('✅ Cupertino Terminal varsayılan terminal olarak kaydedildi');
+    app.exit(0);
+  } catch (err) {
+    console.error('❌ Kayit hatasi:', err);
+    app.exit(1);
+  }
+}
+if (process.defaultApp) {
+  // Dev modunda (electron .) scheme'leri de kaydet
+  app.setAsDefaultProtocolClient('terminal', process.execPath, [path.resolve(process.argv[1])]);
+  app.setAsDefaultProtocolClient('shell',   process.execPath, [path.resolve(process.argv[1])]);
+} else {
+  app.setAsDefaultProtocolClient('terminal');
+  app.setAsDefaultProtocolClient('shell');
+}
+
 // ── Shell profilleri (platformlar-arası) ───────────────────────────────────
 // Windows: WSL / PowerShell 5+7 / CMD;  macOS-Unix: zsh / bash / fish
 const shellProfiles = {
@@ -161,7 +182,48 @@ function createWindow() {
   });
 }
 
+// Derin baglanti / URL scheme istegini coz (terminal:// veya shell://)
+// Format: terminal:///path/to/dir  veya  shell:///path
+function handleDeepLink(url) {
+  try {
+    // URL'den yolu cikar: terminal:///Users/gencay/Project → /Users/gencay/Project
+    const parsed = new URL(url);
+    const cwd = decodeURIComponent(parsed.pathname);
+    if (cwd && fs.existsSync(cwd) && fs.statSync(cwd).isDirectory()) {
+      launchCwd = cwd;
+    }
+  } catch (_) { /* sessiz */ }
+  // Pencere yoksa ac, varsa odaklan
+  if (!mainWindow) {
+    createWindow();
+  } else {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+}
+
 app.whenReady().then(createWindow);
+
+// macOS: URL scheme ile acilma (terminal://...)
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleDeepLink(url);
+});
+
+// macOS: Finder "Birlikte Aç" / NSServices (klasore terminal ac)
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  if (filePath && fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+    launchCwd = filePath;
+  }
+  if (!mainWindow) {
+    createWindow();
+  } else {
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send('navigate:dir', filePath);
+  }
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

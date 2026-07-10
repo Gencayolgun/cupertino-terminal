@@ -50,7 +50,27 @@
     "mac": {
       "target": "dmg",
       "category": "public.app-category.developer-tools",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "protocols": [
+        {
+          "name": "Terminal URL",
+          "schemes": ["terminal", "shell"]
+        }
+      ],
+      "extendInfo": {
+        "NSServices": [
+          {
+            "NSMenuItem": {
+              "default": "Cupertino Terminal'de Aç"
+            },
+            "NSMessage": "openFile",
+            "NSPortName": "Cupertino Terminal",
+            "NSRequiredContext": { "NSApplicationIdentifier": "com.cupertinoterminal.app" },
+            "NSSendTypes": ["public.folder"],
+            "NSFilePath": "/"
+          }
+        ]
+      }
     },
     "win": {
       "target": "nsis",
