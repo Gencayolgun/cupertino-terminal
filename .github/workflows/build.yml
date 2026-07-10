@@ -1,0 +1,50 @@
+name: Build installers
+
+# Sürüm etiketi (v1.2.3) push edilince Windows .exe + macOS .dmg derler ve
+# aynı sürüm için bir GitHub Release oluşturup installer'ları ekler.
+# Elle de tetiklenebilir (Actions sekmesi → Run workflow).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # Release oluşturma/dosya yükleme için
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            pattern: 'dist/*.exe'
+          - os: macos-latest
+            pattern: 'dist/*.dmg'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # CI'de lavamoat yok → native prebuild + electron postinstall normal çalışır
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build installer (electron-builder)
+        run: npm run dist
+        env:
+          # electron-builder'ın kod imzalamayı atlaması için (imzasız derleme)
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Attach installer to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.pattern }}
+          fail_on_unmatched_files: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
