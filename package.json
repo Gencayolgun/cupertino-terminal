@@ -61,7 +61,7 @@
         "NSServices": [
           {
             "NSMenuItem": {
-              "default": "Cupertino Terminal'de Aç"
+              "default": "Cupertino Terminalde Ac"
             },
             "NSMessage": "openFile",
             "NSPortName": "Cupertino Terminal",
