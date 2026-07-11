@@ -1,7 +1,7 @@
 {
   "name": "cupertino-terminal",
   "productName": "Cupertino Terminal",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "description": "Open-source terminal that brings the macOS Terminal look to Windows, macOS and Linux — WSL/zsh, 10 themes, glass/opacity, ZeroLink P2P encrypted remote terminal (SSH-like), bilingual TR/EN UI.",
   "main": "src/main.js",
   "author": "",
@@ -40,6 +40,7 @@
     "appId": "com.cupertinoterminal.app",
     "productName": "Cupertino Terminal",
     "npmRebuild": false,
+    "afterPack": "build/afterPack.js",
     "publish": [
       {
         "provider": "github",
@@ -59,6 +60,9 @@
       "target": "dmg",
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.png",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null,
       "protocols": [
         {
           "name": "Terminal URL",
