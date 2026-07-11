@@ -297,6 +297,8 @@ const LANGS = {
     zlForwardTitle: 'Port Forward (local → remote)',
     zlRemove: 'Remove',
     zlPullPlaceholder: '/remote/path/file',
+    updateSection: 'Updates', version: 'Version', checkUpdate: 'Check for updates',
+    updateGet: 'Update', updateAvail: 'New version', updateNone: 'You are up to date.', updateChecking: 'Checking…',
   },
   tr: {
     close: 'Kapat', minimize: 'Küçült', zoom: 'Büyüt',
@@ -353,6 +355,8 @@ const LANGS = {
     zlForwardTitle: 'Port Yönlendirme (yerel → uzak)',
     zlRemove: 'Kaldır',
     zlPullPlaceholder: '/uzak/yol/dosya',
+    updateSection: 'Güncelleme', version: 'Sürüm', checkUpdate: 'Güncellemeleri denetle',
+    updateGet: 'Güncelle', updateAvail: 'Yeni sürüm', updateNone: 'En güncel sürümdesin.', updateChecking: 'Denetleniyor…',
   },
 };
 function t(key) {
@@ -427,6 +431,10 @@ function applyLanguage() {
   set('#zl-pull-label', 'textContent', L.zlGet);
   set('#zl-fwd-title', 'textContent', L.zlForwardTitle);
   set('#zl-pull-input', 'placeholder', L.zlPullPlaceholder);
+  set('#h3-update', 'textContent', L.updateSection);
+  set('#lbl-version', 'textContent', L.version);
+  set('#btn-check-update', 'textContent', L.checkUpdate);
+  set('#up-get', 'textContent', L.updateGet);
 }
 
 // ---- Ayarlar (macOS Terminal Settings muadili; electron-store'da kalici) ----
@@ -1340,6 +1348,44 @@ document.getElementById('zl-back-btn').addEventListener('click', () => {
   const open = (e) => { e.preventDefault(); window.termAPI.openExternal('https://natureco.me'); };
   nc.addEventListener('click', open);
   nc.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') open(e); });
+})();
+
+// ── Otomatik güncelleme UI (pill + ayarlar butonu) ──
+(() => {
+  const pill = document.getElementById('update-pill');
+  const upText = document.getElementById('up-text');
+  const checkBtn = document.getElementById('btn-check-update');
+  const statusEl = document.getElementById('update-status');
+  const curVer = document.getElementById('cur-version');
+  let updateUrl = null;
+  const L = () => LANGS[settings.lang] || LANGS.en;
+
+  window.termAPI.getCaps().then((c) => { if (c && c.version && curVer) curVer.textContent = 'v' + c.version; }).catch(() => {});
+
+  window.termAPI.onUpdateAvailable(({ version, url }) => {
+    updateUrl = url;
+    const msg = (L().updateAvail || 'New version') + ' v' + version;
+    if (upText) upText.textContent = msg;
+    if (pill) pill.hidden = false;
+    if (statusEl) { statusEl.textContent = msg; statusEl.className = 'hint ok'; }
+  });
+  window.termAPI.onUpdateNone(() => {
+    if (statusEl) { statusEl.textContent = L().updateNone || 'You are up to date.'; statusEl.className = 'hint ok'; }
+    if (checkBtn) checkBtn.disabled = false;
+  });
+  window.termAPI.onUpdateError(({ message }) => {
+    if (statusEl) { statusEl.textContent = '⚠ ' + message; statusEl.className = 'hint err'; }
+    if (checkBtn) checkBtn.disabled = false;
+  });
+
+  document.getElementById('up-get')?.addEventListener('click', () => { if (updateUrl) window.termAPI.openExternal(updateUrl); });
+  document.getElementById('up-close')?.addEventListener('click', () => { if (pill) pill.hidden = true; });
+  checkBtn?.addEventListener('click', () => {
+    if (statusEl) { statusEl.textContent = L().updateChecking || 'Checking…'; statusEl.className = 'hint'; }
+    checkBtn.disabled = true;
+    window.termAPI.checkForUpdates();
+    setTimeout(() => { checkBtn.disabled = false; }, 5000);
+  });
 })();
 
 // Gomulu fontu xterm ilk olcumden ONCE yukle (yoksa glyph metrigi kayar), sonra ilk sekme.

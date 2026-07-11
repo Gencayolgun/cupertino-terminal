@@ -139,6 +139,14 @@
   <!-- Settings panel (equivalent of macOS Terminal "Settings" / Cmd+,).
        All captions are (re)written at runtime by applyLanguage() — English here is
        just the fallback before the i18n dictionary loads. -->
+  <!-- Yeni sürüm bildirimi (otomatik denetim yeni sürüm bulunca görünür) -->
+  <div id="update-pill" hidden>
+    <span class="up-dot"></span>
+    <span id="up-text">New version available</span>
+    <button id="up-get" class="up-get">Update</button>
+    <button id="up-close" class="up-close" title="Dismiss">&#215;</button>
+  </div>
+
   <div id="settings-overlay" hidden>
     <div id="settings-panel">
       <div class="settings-header">
@@ -210,6 +218,15 @@
               <button data-lang="en">English</button>
             </div>
           </div>
+        </div>
+
+        <div class="settings-section">
+          <h3 id="h3-update">Updates</h3>
+          <div class="settings-row">
+            <label><span id="lbl-version">Version</span> <span id="cur-version" class="mono-ver">—</span></label>
+            <button id="btn-check-update" class="update-btn">Check for updates</button>
+          </div>
+          <p class="hint" id="update-status"></p>
         </div>
       </div>
       <div class="settings-footer">

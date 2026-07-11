@@ -41,6 +41,12 @@ contextBridge.exposeInMainWorld('termAPI', {
   // Dis baglanti (NatureCo imzasi / natureco.me) — sistem tarayicisinda ac
   openExternal: (url) => ipcRenderer.send('shell:openExternal', url),
 
+  // Otomatik guncelleme
+  checkForUpdates: () => ipcRenderer.send('update:check'),
+  onUpdateAvailable: (cb) => { const l = (_, d) => cb(d); ipcRenderer.on('update:available', l); return () => ipcRenderer.removeListener('update:available', l); },
+  onUpdateNone:      (cb) => { const l = (_, d) => cb(d); ipcRenderer.on('update:none', l);      return () => ipcRenderer.removeListener('update:none', l); },
+  onUpdateError:     (cb) => { const l = (_, d) => cb(d); ipcRenderer.on('update:error', l);     return () => ipcRenderer.removeListener('update:error', l); },
+
   // Pencere odak/blur — traffic-light'lari griye cevirmek icin (macOS davranisi)
   onFocusChange: (callback) => {
     const listener = (event, focused) => callback(focused);

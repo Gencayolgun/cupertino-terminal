@@ -160,6 +160,9 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
   Menu.setApplicationMenu(null);
 
+  // Açılıştan birkaç sn sonra sessizce güncelleme denetle (yeni sürüm varsa bildirir)
+  mainWindow.webContents.once('did-finish-load', () => setTimeout(() => checkForUpdates(false), 4000));
+
   // Odak/blur bilgisini renderer'a ilet (traffic-light'lar macOS gibi grilesin)
   mainWindow.on('focus', () => mainWindow?.webContents.send('window:focus', true));
   mainWindow.on('blur', () => mainWindow?.webContents.send('window:focus', false));
@@ -252,6 +255,42 @@ ipcMain.on('shell:openExternal', (event, url) => {
   if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url);
 });
 
+// ---- Otomatik güncelleme denetimi (GitHub Releases) ----
+// Açılışta ve butonla denetler; yeni sürüm varsa renderer'a bildirir → kullanıcı
+// tek tıkla platformuna uygun installer'ı indirir. (Windows'ta ileride electron-updater
+// ile tam sessiz yapılabilir; Mac sessiz güncelleme Apple imzası ister.)
+const UPDATE_REPO = 'Gencayolgun/cupertino-terminal';
+function _cmpVer(a, b) {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) { if ((pa[i] || 0) > (pb[i] || 0)) return 1; if ((pa[i] || 0) < (pb[i] || 0)) return -1; }
+  return 0;
+}
+async function checkForUpdates(manual = false) {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'CupertinoTerminal' },
+    });
+    if (!res.ok) throw new Error(`GitHub ${res.status}`);
+    const rel = await res.json();
+    const latest = String(rel.tag_name || '').replace(/^v/, '');
+    const current = app.getVersion();
+    if (latest && _cmpVer(latest, current) > 0) {
+      const ext = process.platform === 'darwin' ? '.dmg' : '.exe';
+      const asset = (rel.assets || []).find((a) => a.name.toLowerCase().endsWith(ext));
+      mainWindow?.webContents.send('update:available', {
+        version: latest,
+        url: asset ? asset.browser_download_url : rel.html_url,
+      });
+    } else if (manual) {
+      mainWindow?.webContents.send('update:none', { version: current });
+    }
+  } catch (err) {
+    if (manual) mainWindow?.webContents.send('update:error', { message: err.message });
+  }
+}
+ipcMain.on('update:check', () => checkForUpdates(true));
+
 // ---- IPC: terminal sekmesi olustur ----
 ipcMain.handle('pty:create', (event, { tabId, profileKey, cols, rows }) => {
   if (!pty) throw new Error('node-pty mevcut degil');
@@ -311,7 +350,7 @@ ipcMain.handle('shell:list', () => {
 });
 
 // Sistem yetenekleri: bugulu cam destegi + platform (renderer ⌘/Ctrl ve Win10 fallback icin)
-ipcMain.handle('sys:caps', () => ({ acrylic: BLUR_SUPPORTED, platform: process.platform }));
+ipcMain.handle('sys:caps', () => ({ acrylic: BLUR_SUPPORTED, platform: process.platform, version: app.getVersion() }));
 
 // Cam efekti degisiminde temiz yeniden baslatma (transparent sonradan degistirilemez)
 ipcMain.on('app:relaunch', () => {
