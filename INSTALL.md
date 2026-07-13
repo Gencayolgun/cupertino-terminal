@@ -3,13 +3,13 @@
 En güncel installer'lar her zaman burada:
 **https://github.com/natureco-official/cupertino-terminal/releases/latest**
 
-- **Windows** → `Cupertino.Terminal.Setup.<sürüm>.exe`
-- **macOS** → mimarinize uygun `arm64.dmg` veya `x64.dmg`
+- **Windows** → `Cupertino Terminal-<sürüm>-x64-setup.exe`
+- **macOS** → `Cupertino Terminal-<sürüm>-arm64.dmg` veya `-x64.dmg`
 
 Kurulumdan sonra uygulama şuralara yerleşir (masaüstünde **kalmaz**):
 | Platform | Kurulum yeri | Kısayol |
 |---|---|---|
-| Windows | `C:\Program Files\Cupertino Terminal\` | Masaüstü + Başlat menüsü kısayolu (çift tıkla aç) |
+| Windows | `%LOCALAPPDATA%\Programs\Cupertino Terminal\` | Masaüstü + Başlat menüsü kısayolu (çift tıkla aç) |
 | macOS | `/Applications/Cupertino Terminal.app` | Launchpad + Dock (tek tıkla aç) |
 
 ---
@@ -17,10 +17,10 @@ Kurulumdan sonra uygulama şuralara yerleşir (masaüstünde **kalmaz**):
 ## 👤 İnsanlar için
 
 ### Windows
-1. Releases sayfasından `Cupertino.Terminal.Setup.<sürüm>.exe` dosyasını indir.
+1. Releases sayfasından `Cupertino Terminal-<sürüm>-x64-setup.exe` dosyasını indir.
 2. Çift tıkla. SmartScreen uyarısı çıkarsa: **Ek bilgi → Yine de çalıştır**.
-3. Kurulum sihirbazı açılır → yönetici izni ister (C: diskine kurmak için) → **Kur**.
-4. Uygulama `C:\Program Files\Cupertino Terminal`'e kurulur; **masaüstünde bir kısayol** oluşur.
+3. Kurulum sihirbazında kullanıcıya ait kurulum dizinini seçip **Kur** düğmesine basın; yönetici izni gerekmez.
+4. Uygulama varsayılan olarak `%LOCALAPPDATA%\Programs\Cupertino Terminal` altına kurulur; **masaüstünde bir kısayol** oluşur.
 5. Masaüstündeki **Cupertino Terminal** simgesine çift tıkla — açılır. (İndirdiğin `.exe`'yi artık silebilirsin.)
 
 ### macOS
@@ -37,25 +37,26 @@ Kurulumdan sonra uygulama şuralara yerleşir (masaüstünde **kalmaz**):
 
 Sürümden bağımsız; GitHub API'den son sürümün doğru dosyasını bulur, indirir, doğru yere kurar.
 
-### Windows (PowerShell — yönetici gerekir)
+### Windows (PowerShell — yönetici gerekmez)
 ```powershell
-$repo  = 'Gencayolgun/cupertino-terminal'
+$repo  = 'natureco-official/cupertino-terminal'
 $rel   = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
 $asset = $rel.assets | Where-Object { $_.name -like '*.exe' } | Select-Object -First 1
 $out   = Join-Path $env:TEMP $asset.name
 Invoke-WebRequest $asset.browser_download_url -OutFile $out
-# /S = sessiz kurulum; C:\Program Files'a kurar + masaüstü kısayolu oluşturur
-Start-Process $out -ArgumentList '/S' -Verb RunAs -Wait
+# /S = kullanıcı profiline sessiz kurulum + masaüstü kısayolu
+Start-Process $out -ArgumentList '/S' -Wait
 Remove-Item $out -Force
 # Başlat: masaüstü kısayolu veya:
-# & "C:\Program Files\Cupertino Terminal\Cupertino Terminal.exe"
+# & "$env:LOCALAPPDATA\Programs\Cupertino Terminal\Cupertino Terminal.exe"
 ```
 
 ### macOS (bash/zsh)
 ```bash
 repo="natureco-official/cupertino-terminal"
+arch=$(uname -m); [[ "$arch" == "arm64" ]] || arch="x64"
 url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
-      | grep -o '"browser_download_url": *"[^"]*\.dmg"' | head -1 | cut -d'"' -f4)
+      | grep -o '"browser_download_url": *"[^"]*-'"$arch"'\.dmg"' | head -1 | cut -d'"' -f4)
 tmp=$(mktemp -d); dmg="$tmp/cupertino.dmg"
 curl -fL "$url" -o "$dmg"
 mnt=$(hdiutil attach "$dmg" -nobrowse -noverify | grep -o '/Volumes/.*')

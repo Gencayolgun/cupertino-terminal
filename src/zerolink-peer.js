@@ -185,6 +185,7 @@ class ZeroLinkPeer extends EventEmitter {
     this._signalPort   = 0;     // gerçekte bağlanılan port
     this._hsSent       = false; // handshake gönderildi mi (idempotent)
     this._closed       = false;
+    this._expectedRemotePublicKey = null;
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -292,6 +293,11 @@ class ZeroLinkPeer extends EventEmitter {
   get addrs()          { return this._addrs; }
   get signalPort()     { return this._signalPort; }
 
+  expectRemotePublicKey(publicKey) {
+    if (!Buffer.isBuffer(publicKey) || publicKey.length !== 33) throw new Error('Geçersiz beklenen uzak public key');
+    this._expectedRemotePublicKey = Buffer.from(publicKey);
+  }
+
   // ── Sinyalleşme (UDP rendezvous) ────────────────────────────────────────────
 
   /**
@@ -372,6 +378,9 @@ class ZeroLinkPeer extends EventEmitter {
       if (!this._encKey) {
         try {
           const { publicKey } = parseHandshake(buf);
+          if (this._expectedRemotePublicKey && !crypto.timingSafeEqual(publicKey, this._expectedRemotePublicKey)) {
+            throw new Error('Uzak kimlik kodla eşleşmiyor (olası aradaki-adam saldırısı)');
+          }
           const { encKey } = deriveSessionKeys(this._keyPair.ecdh, publicKey);
           this._encKey = encKey;
           sendHandshakeOnce(); // karşı taraf bizimkini almadıysa (onOpen kaçtıysa)

@@ -14,7 +14,7 @@ try {
   console.error('node-pty (prebuilt) yuklenemedi:', err);
 }
 
-const { execSync } = require('child_process');
+const { execFileSync, execSync } = require('child_process');
 const fs = require('fs');
 const store = new Store(IS_SMOKE_TEST ? { name: 'cupertino-smoke-test' } : undefined);
 if (IS_SMOKE_TEST) {
@@ -29,7 +29,9 @@ if (IS_SMOKE_TEST) {
   });
 }
 const APP_STARTED_AT = Date.now();
-const { validDirectory, directoryFromDeepLink, directoryFromArgs } = require('./path-utils');
+const { validDirectory, directoryForOpenTarget, directoryFromDeepLink, directoryFromArgs } = require('./path-utils');
+const { buildShellLaunch } = require('./shell-runtime');
+const { normalizeTabId, normalizeDimensions, normalizePtyInput } = require('./pty-params');
 
 // Baslangic calisma dizini: Explorer sag-tik "Cupertino Terminal'de Ac" komut satirinda
 // klasor yolu gecirir (argv: [electron.exe, uygulamaDizini, KLASOR]). Ilk iki arguman
@@ -68,7 +70,7 @@ const shellProfiles = {
   zsh:        { command: 'zsh',            args: ['-l'],        name: 'zsh' },
   bash:       { command: 'bash',           args: ['-l'],        name: 'bash' },
   fish:       { command: 'fish',           args: ['-l'],        name: 'fish' },
-  wsl:        { command: 'wsl.exe',        args: ['--cd', '~'], name: 'WSL' },
+  wsl:        { command: 'wsl.exe',        args: [],            name: 'WSL' },
   powershell: { command: 'powershell.exe', args: [],            name: 'PowerShell' },
   pwsh:       { command: 'pwsh.exe',       args: [],            name: 'PowerShell 7' },
   cmd:        { command: 'cmd.exe',        args: [],            name: 'Command Prompt' },
@@ -80,8 +82,8 @@ function commandExists(cmd) {
   if (_cmdCache.has(cmd)) return _cmdCache.get(cmd);
   let ok = false;
   try {
-    const probe = process.platform === 'win32' ? 'where' : 'command -v';
-    execSync(`${probe} ${cmd}`, { timeout: 3000, stdio: 'ignore' });
+    if (process.platform === 'win32') execFileSync('where.exe', [cmd], { timeout: 3000, stdio: 'ignore' });
+    else execFileSync('/usr/bin/env', ['sh', '-c', 'command -v "$1"', 'sh', cmd], { timeout: 3000, stdio: 'ignore' });
     ok = true;
   } catch (_) { ok = false; }
   _cmdCache.set(cmd, ok);
@@ -175,6 +177,13 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url !== mainWindow.webContents.getURL()) event.preventDefault();
+  });
 
   if (IS_SMOKE_TEST) {
     mainWindow.webContents.once('did-finish-load', async () => {
@@ -297,19 +306,16 @@ function unpackedPath(relativePath) {
   return app.isPackaged ? source.replace('app.asar', 'app.asar.unpacked') : source;
 }
 
-function shellLaunch(profile) {
-  const env = { ...process.env, TERM_PROGRAM: 'Cupertino_Terminal', TERM_PROGRAM_VERSION: app.getVersion() };
-  if (profile.command === 'zsh') {
-    env.CUPERTINO_ORIGINAL_ZDOTDIR = process.env.ZDOTDIR || os.homedir();
-    env.ZDOTDIR = unpackedPath('shell-integration');
-  }
-  if (profile.command === 'bash') {
-    return { args: ['--rcfile', unpackedPath('shell-integration/bash.bash'), '-i'], env };
-  }
-  if (profile.command === 'powershell.exe' || profile.command === 'pwsh.exe') {
-    return { args: ['-NoExit', '-File', unpackedPath('shell-integration/powershell.ps1')], env };
-  }
-  return { args: [...profile.args], env };
+function shellLaunch(profile, cwd) {
+  return buildShellLaunch({
+    profile,
+    cwd,
+    platform: process.platform,
+    env: process.env,
+    version: app.getVersion(),
+    userDataDir: app.getPath('userData'),
+    integrationDir: unpackedPath('shell-integration'),
+  });
 }
 
 function sendRenderer(channel, payload) {
@@ -366,7 +372,7 @@ app.on('open-url', (event, url) => {
 // macOS: Finder "Birlikte Aç" / NSServices (klasore terminal ac)
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
-  const cwd = validDirectory(filePath);
+  const cwd = directoryForOpenTarget(filePath);
   if (cwd && openDirectory(cwd)) return;
   if (!app.isReady()) return;
   if (!mainWindow) {
@@ -551,19 +557,23 @@ ipcMain.on('nc:account:logout', () => ncAccount.logout());
 ipcMain.handle('pty:create', (event, { tabId, profileKey, cols, rows, cwd: requestedCwd }) => {
   if (!pty) throw new Error('node-pty mevcut degil');
 
+  tabId = normalizeTabId(tabId);
+  const dimensions = normalizeDimensions(cols, rows);
+  const previous = ptyProcesses.get(tabId);
+  if (previous) { try { previous.kill(); } catch (_) {} ptyProcesses.delete(tabId); }
   const profile = shellProfiles[profileKey] || getDefaultShell();
   const cwd = validDirectory(requestedCwd) || launchCwd || os.homedir();
   launchCwd = null;
 
   // WSL'de calisma dizinini --cd belirler (Windows yolu kabul eder); digerlerinde cwd.
-  const launch = shellLaunch(profile);
+  const launch = shellLaunch(profile, cwd);
   let args = launch.args;
   if (cwd && profile.command === 'wsl.exe') args = ['--cd', cwd];
 
   const proc = pty.spawn(profile.command, args, {
     name: 'xterm-256color',
-    cols: cols || 80,
-    rows: rows || 30,
+    cols: dimensions.cols,
+    rows: dimensions.rows,
     cwd,
     env: launch.env,
   });
@@ -583,19 +593,27 @@ ipcMain.handle('pty:create', (event, { tabId, profileKey, cols, rows, cwd: reque
 });
 
 ipcMain.on('pty:write', (event, { tabId, data }) => {
-  ptyProcesses.get(tabId)?.write(data);
+  try {
+    const input = normalizePtyInput(data);
+    if (input !== null) ptyProcesses.get(normalizeTabId(tabId))?.write(input);
+  } catch (_) {}
 });
 
 ipcMain.on('pty:resize', (event, { tabId, cols, rows }) => {
-  const proc = ptyProcesses.get(tabId);
+  let id;
+  try { id = normalizeTabId(tabId); } catch (_) { return; }
+  const proc = ptyProcesses.get(id);
   if (proc) {
-    try { proc.resize(cols, rows); } catch (_) {}
+    const dimensions = normalizeDimensions(cols, rows);
+    try { proc.resize(dimensions.cols, dimensions.rows); } catch (_) {}
   }
 });
 
 ipcMain.on('pty:kill', (event, { tabId }) => {
-  ptyProcesses.get(tabId)?.kill();
-  ptyProcesses.delete(tabId);
+  let id;
+  try { id = normalizeTabId(tabId); } catch (_) { return; }
+  try { ptyProcesses.get(id)?.kill(); } catch (_) {}
+  ptyProcesses.delete(id);
 });
 
 // Sadece sistemde gercekten yuklu olan kabuklari dondur (platform-bagimsiz)

@@ -8,7 +8,7 @@ A cross-platform terminal focused on a polished macOS-style experience without g
 
 ## Highlights
 
-- Native PTY sessions with PowerShell, Command Prompt, WSL, zsh and bash detection
+- Native PTY sessions with PowerShell, Command Prompt, WSL, zsh, bash and fish detection
 - Ten classic terminal color profiles, adjustable opacity and glass effects
 - Tabs plus persistent vertical or horizontal split panes with draggable dividers
 - Session restore for tabs, pane layouts, working directories and window state
@@ -80,7 +80,7 @@ npm run dist
 
 ## Shell integration
 
-Cupertino Terminal automatically injects its integration into supported zsh, bash and PowerShell sessions. This provides reliable current-directory tracking, prompt boundaries, command duration and exit status. It does not modify the user's shell configuration files.
+Cupertino Terminal automatically injects its integration into supported zsh, bash, fish and PowerShell sessions. Runtime files live in the writable application-data directory, never inside the read-only app bundle. This provides reliable current-directory tracking, prompt boundaries, command duration and exit status without modifying the user's shell configuration files.
 
 WSL distributions are detected automatically on Windows. When available, WSL is preferred; otherwise the app falls back to PowerShell.
 
@@ -88,7 +88,7 @@ WSL distributions are detected automatically on Windows. When available, WSL is 
 
 ZeroLink creates an end-to-end encrypted remote shell between two peers. Use `Ctrl/⌘+L` to share a dedicated shell or connect with a one-time code. It supports interactive sessions, terminal resize, file transfer and local port forwarding.
 
-ZeroLink uses ephemeral ECDH P-256, HKDF and AES-256-GCM with replay protection. Connection codes are one-time and expire after five minutes. Cross-network connectivity depends on NAT conditions and may require a separately configured TURN relay; terminal content remains encrypted through a relay.
+ZeroLink uses ephemeral ECDH P-256, pinned handshake keys, HKDF and AES-256-GCM with strict replay/order protection. Connection codes are one-time and expire after five minutes. Cross-network connectivity depends on NAT conditions and may require a separately configured TURN relay; terminal content remains encrypted through a relay.
 
 ## Release process
 

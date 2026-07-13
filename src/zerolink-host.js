@@ -115,8 +115,9 @@ class ZeroLinkHost extends EventEmitter {
 
   // ── Gelen çerçeveleri işle ──────────────────────────────────────────────────
   _onFrame(buf) {
-    const { type, payload } = P.parseFrame(buf);
-    switch (type) {
+    try {
+      const { type, payload } = P.parseFrame(buf);
+      switch (type) {
       case P.T.DATA:
         this._session?.write(payload.toString('utf8'));
         break;
@@ -138,9 +139,12 @@ class ZeroLinkHost extends EventEmitter {
       case P.T.FWD_OPEN:   this._fwd?.open(payload);   break;
       case P.T.FWD_DATA:   this._fwd?.data(payload);   break;
       case P.T.FWD_CLOSE:  this._fwd?.close(payload);  break;
-      default:
+        default:
         // bilinmeyen tip — yoksay (ileri sürüm uyumluluğu)
-        break;
+          break;
+      }
+    } catch (error) {
+      this.emit('error', new Error(`Geçersiz ZeroLink çerçevesi: ${error.message}`));
     }
   }
 

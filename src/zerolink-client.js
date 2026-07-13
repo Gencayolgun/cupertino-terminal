@@ -61,6 +61,7 @@ class ZeroLinkClient extends EventEmitter {
 
     this._peer = new ZeroLinkPeer();
     await this._peer.prepare({ bindPort: 0, discover: false });
+    this._peer.expectRemotePublicKey(decoded.publicKey);
 
     this._peer.onSignal((msg, rinfo) => this._handleSignal(msg, rinfo));
 
@@ -95,8 +96,9 @@ class ZeroLinkClient extends EventEmitter {
 
   // ── Gelen çerçeveler ────────────────────────────────────────────────────────
   _onFrame(buf) {
-    const { type, payload } = P.parseFrame(buf);
-    switch (type) {
+    try {
+      const { type, payload } = P.parseFrame(buf);
+      switch (type) {
       case P.T.DATA:       this.emit('data', payload); break;
       case P.T.EXIT:       this.emit('remoteExit', P.decodeExit(payload)); break;
       // Dosya: uzaktan indirme (pull) yanıtı → diske yaz
@@ -108,7 +110,10 @@ class ZeroLinkClient extends EventEmitter {
       // Port yönlendirme dönüş trafiği
       case P.T.FWD_DATA:   this._fwd?.data(payload);  break;
       case P.T.FWD_CLOSE:  this._fwd?.close(payload); break;
-      default: break;
+        default: break;
+      }
+    } catch (error) {
+      this.emit('error', new Error(`Geçersiz ZeroLink çerçevesi: ${error.message}`));
     }
   }
 

@@ -10,6 +10,17 @@ function validDirectory(candidate, fsImpl = require('fs')) {
   } catch (_) { return null; }
 }
 
+function directoryForOpenTarget(candidate, fsImpl = require('fs')) {
+  if (typeof candidate !== 'string' || !candidate.trim()) return null;
+  try {
+    const resolved = path.resolve(candidate);
+    const stat = fsImpl.statSync(resolved);
+    if (stat.isDirectory()) return resolved;
+    if (stat.isFile()) return path.dirname(resolved);
+    return null;
+  } catch (_) { return null; }
+}
+
 function directoryFromDeepLink(value, platform = process.platform) {
   try {
     const parsed = new URL(value);
@@ -31,4 +42,4 @@ function directoryFromArgs(argv, defaultApp = false, fsImpl = require('fs')) {
   return null;
 }
 
-module.exports = { validDirectory, directoryFromDeepLink, directoryFromArgs };
+module.exports = { validDirectory, directoryForOpenTarget, directoryFromDeepLink, directoryFromArgs };

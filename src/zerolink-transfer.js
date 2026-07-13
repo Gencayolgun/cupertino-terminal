@@ -14,6 +14,7 @@ const net  = require('net');
 const P    = require('./zerolink-proto');
 
 const CHUNK = 16 * 1024;
+const MAX_FILE_BYTES = 1024 * 1024 * 1024;
 const DOWNLOAD_DIR = () => path.join(os.homedir(), 'ZeroLink-Downloads');
 
 // ── Gelen dosyaları diske yazan alıcı ────────────────────────────────────────
@@ -27,12 +28,32 @@ class FileSink {
 
   meta(payload) {
     const { id, size, name } = P.decodeFileMeta(payload);
+    if (size > MAX_FILE_BYTES) {
+      this._send(P.frame(P.T.FILE_ERR, Buffer.concat([P.encodeU32(id), Buffer.from('Dosya 1 GiB güvenlik sınırını aşıyor', 'utf8')])));
+      return;
+    }
+    const previous = this._files.get(id);
+    if (previous) { try { previous.ws.destroy(); fs.rmSync(previous.temp, { force: true }); } catch (_) {} this._files.delete(id); }
     // Yol geçişi (path traversal) koruması: sadece dosya adı, güvenli klasöre
     const safe = path.basename(name).replace(/[\\/:*?"<>|]/g, '_') || `zerolink-${id}`;
-    const dest = path.join(DOWNLOAD_DIR(), safe);
+    const dir = DOWNLOAD_DIR();
+    let dest = path.join(dir, safe);
+    if (fs.existsSync(dest)) {
+      const ext = path.extname(safe); const stem = path.basename(safe, ext);
+      dest = path.join(dir, `${stem}-${Date.now()}${ext}`);
+    }
+    const temp = `${dest}.part-${process.pid}-${id}`;
     try {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
-      this._files.set(id, { ws: fs.createWriteStream(dest), name: safe, dest, size, received: 0 });
+      const record = { ws: fs.createWriteStream(temp, { flags: 'wx', mode: 0o600 }), name: path.basename(dest), dest, temp, size, received: 0, failed: false };
+      record.ws.on('error', (error) => {
+        if (record.failed) return;
+        record.failed = true;
+        this._files.delete(id);
+        try { fs.rmSync(temp, { force: true }); } catch (_) {}
+        this._send(P.frame(P.T.FILE_ERR, Buffer.concat([P.encodeU32(id), Buffer.from(error.message, 'utf8')])));
+      });
+      this._files.set(id, record);
     } catch (err) {
       this._send(P.frame(P.T.FILE_ERR, Buffer.concat([P.encodeU32(id), Buffer.from(err.message, 'utf8')])));
     }
@@ -42,6 +63,13 @@ class FileSink {
     const { id, data } = P.decodeFileChunk(payload);
     const f = this._files.get(id);
     if (!f) return;
+    if (f.received + data.length > f.size || f.received + data.length > MAX_FILE_BYTES) {
+      this._files.delete(id);
+      f.ws.destroy();
+      try { fs.rmSync(f.temp, { force: true }); } catch (_) {}
+      this._send(P.frame(P.T.FILE_ERR, Buffer.concat([P.encodeU32(id), Buffer.from('Dosya boyutu bildirilen sınırı aştı', 'utf8')])));
+      return;
+    }
     f.ws.write(data);
     f.received += data.length;
   }
@@ -51,14 +79,27 @@ class FileSink {
     const f = this._files.get(id);
     if (!f) return;
     this._files.delete(id);
+    if (f.failed) return;
+    if (f.received !== f.size) {
+      f.ws.destroy();
+      try { fs.rmSync(f.temp, { force: true }); } catch (_) {}
+      this._send(P.frame(P.T.FILE_ERR, Buffer.concat([P.encodeU32(id), Buffer.from('Dosya eksik alındı', 'utf8')])));
+      return;
+    }
     f.ws.end(() => {
-      this._send(P.frame(P.T.FILE_ACK, Buffer.concat([P.encodeU32(id), P.encodeU32(f.received)])));
-      this._onDone?.({ name: f.name, dest: f.dest, bytes: f.received });
+      try {
+        fs.renameSync(f.temp, f.dest);
+        this._send(P.frame(P.T.FILE_ACK, Buffer.concat([P.encodeU32(id), P.encodeU32(f.received)])));
+        this._onDone?.({ name: f.name, dest: f.dest, bytes: f.received });
+      } catch (error) {
+        try { fs.rmSync(f.temp, { force: true }); } catch (_) {}
+        this._send(P.frame(P.T.FILE_ERR, Buffer.concat([P.encodeU32(id), Buffer.from(error.message, 'utf8')])));
+      }
     });
   }
 
   destroy() {
-    for (const f of this._files.values()) { try { f.ws.destroy(); } catch (_) {} }
+    for (const f of this._files.values()) { try { f.ws.destroy(); fs.rmSync(f.temp, { force: true }); } catch (_) {} }
     this._files.clear();
   }
 }
@@ -72,6 +113,16 @@ function sendFile(send, id, filePath, onProgress) {
     let stat;
     try { stat = fs.statSync(filePath); }
     catch (err) {
+      send(P.frame(P.T.FILE_ERR, Buffer.concat([P.encodeU32(id), Buffer.from(err.message, 'utf8')])));
+      return reject(err);
+    }
+    if (!stat.isFile()) {
+      const err = new Error('Yalnızca normal dosyalar gönderilebilir');
+      send(P.frame(P.T.FILE_ERR, Buffer.concat([P.encodeU32(id), Buffer.from(err.message, 'utf8')])));
+      return reject(err);
+    }
+    if (stat.size > MAX_FILE_BYTES) {
+      const err = new Error('Dosya 1 GiB güvenlik sınırını aşıyor');
       send(P.frame(P.T.FILE_ERR, Buffer.concat([P.encodeU32(id), Buffer.from(err.message, 'utf8')])));
       return reject(err);
     }
@@ -141,4 +192,4 @@ class ForwardHub {
   }
 }
 
-module.exports = { FileSink, sendFile, ForwardHub, DOWNLOAD_DIR };
+module.exports = { FileSink, sendFile, ForwardHub, DOWNLOAD_DIR, MAX_FILE_BYTES };

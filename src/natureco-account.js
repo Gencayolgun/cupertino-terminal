@@ -28,8 +28,10 @@ function loadSession() {
 function saveSession(session) {
   const file = authFile();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(session, null, 2));
-  try { fs.chmodSync(file, 0o600); } catch (_) {}
+  const temp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(temp, JSON.stringify(session, null, 2), { encoding: 'utf8', mode: 0o600 });
+  try { fs.chmodSync(temp, 0o600); } catch (_) {}
+  fs.renameSync(temp, file);
   return session;
 }
 

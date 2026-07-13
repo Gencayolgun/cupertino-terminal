@@ -7,15 +7,16 @@ const TARGET_BYTES = 5_000_000;
 const LIMIT_MS = 15_000;
 
 app.whenReady().then(() => {
-  const isWin = process.platform === 'win32';
-  const command = isWin ? 'powershell.exe' : '/bin/sh';
-  const args = isWin
-    ? ['-NoProfile', '-Command', `[Console]::Out.Write('x' * ${TARGET_BYTES})`]
-    : ['-lc', `head -c ${TARGET_BYTES} /dev/zero | tr '\\0' x`];
+  // Measure the PTY transport itself, not shell-specific string construction.
+  // npm_node_execpath is the real Node binary even though this script itself
+  // runs under Electron.
+  const command = process.env.npm_node_execpath || 'node';
+  const args = ['-e', `process.stdout.write('x'.repeat(${TARGET_BYTES}))`];
   const started = performance.now();
   let bytes = 0;
   const child = pty.spawn(command, args, {
-    name: 'xterm-256color', cols: 120, rows: 40, cwd: app.getPath('home'), env: process.env,
+    name: 'xterm-256color', cols: 120, rows: 40, cwd: app.getPath('home'),
+    env: process.env,
   });
   const timer = setTimeout(() => {
     try { child.kill(); } catch (_) {}

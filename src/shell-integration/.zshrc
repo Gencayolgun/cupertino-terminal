@@ -1,15 +1,3 @@
-# Restore the user's startup/history directory before loading their config. The
-# app bundle can be read-only on macOS (especially under App Translocation).
-if [[ -n "$CUPERTINO_ORIGINAL_ZDOTDIR" ]]; then
-  ZDOTDIR="$CUPERTINO_ORIGINAL_ZDOTDIR"
-fi
-
-if [[ -r "$ZDOTDIR/.zshrc" ]]; then
-  source "$ZDOTDIR/.zshrc"
-elif [[ -r "$HOME/.zshrc" ]]; then
-  source "$HOME/.zshrc"
-fi
-
 autoload -Uz add-zsh-hook
 _cupertino_precmd() {
   local exit_code=$?

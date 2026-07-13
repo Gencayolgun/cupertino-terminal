@@ -32,6 +32,10 @@ const T = {
   FWD_CLOSE: 0x22, // streamId
 };
 
+function requireLength(payload, minimum, label) {
+  if (!Buffer.isBuffer(payload) || payload.length < minimum) throw new Error(`${label} payload too short`);
+}
+
 // ── Çerçeve oluştur / ayrıştır ────────────────────────────────────────────────
 function frame(type, payload) {
   const body = payload == null
@@ -53,6 +57,7 @@ function encodeResize(cols, rows) {
   return b;
 }
 function decodeResize(p) {
+  requireLength(p, 4, 'RESIZE');
   return { cols: p.readUInt16BE(0), rows: p.readUInt16BE(2) };
 }
 
@@ -78,9 +83,12 @@ function encodeFileMeta({ id, size, name }) {
   return b;
 }
 function decodeFileMeta(p) {
+  requireLength(p, 14, 'FILE_META');
   const id      = p.readUInt32BE(0);
   const size    = Number(p.readBigUInt64BE(4));
   const nameLen = p.readUInt16BE(12);
+  if (nameLen > 4096 || p.length !== 14 + nameLen) throw new Error('FILE_META invalid name length');
+  if (!Number.isSafeInteger(size) || size < 0) throw new Error('FILE_META invalid size');
   const name    = p.subarray(14, 14 + nameLen).toString('utf8');
   return { id, size, name };
 }
@@ -93,23 +101,26 @@ function encodeFileChunk(id, data) {
   return Buffer.concat([head, data]);
 }
 function decodeFileChunk(p) {
+  requireLength(p, 4, 'FILE_CHUNK');
   return { id: p.readUInt32BE(0), data: p.subarray(4) };
 }
 
 // id:4 (FILE_END / FILE_ACK / FILE_ERR / FWD_CLOSE ortak baş)
 function encodeU32(id) { const b = Buffer.alloc(4); b.writeUInt32BE(id >>> 0, 0); return b; }
-function decodeU32(p)  { return p.readUInt32BE(0); }
+function decodeU32(p)  { requireLength(p, 4, 'U32'); return p.readUInt32BE(0); }
 
 // ── FILE_REQ (pull): [ id:4 | path:utf8 ] ─────────────────────────────────────
 function encodeFileReq(id, remotePath) {
   return Buffer.concat([encodeU32(id), Buffer.from(remotePath, 'utf8')]);
 }
 function decodeFileReq(p) {
+  requireLength(p, 5, 'FILE_REQ');
   return { id: p.readUInt32BE(0), remotePath: p.subarray(4).toString('utf8') };
 }
 
 // ── FILE_ACK: [ id:4 | received:4 ] ───────────────────────────────────────────
 function decodeFileAck(p) {
+  requireLength(p, 4, 'FILE_ACK');
   return { id: p.readUInt32BE(0), received: p.length >= 8 ? p.readUInt32BE(4) : 0 };
 }
 
@@ -119,6 +130,7 @@ function encodeFwdOpen(streamId, target) {
   return Buffer.concat([encodeU32(streamId), Buffer.from(target, 'utf8')]);
 }
 function decodeFwdOpen(p) {
+  requireLength(p, 6, 'FWD_OPEN');
   return { streamId: p.readUInt32BE(0), target: p.subarray(4).toString('utf8') };
 }
 // FWD_DATA:  [ streamId:4 | data... ]
@@ -126,6 +138,7 @@ function encodeFwdData(streamId, data) {
   return Buffer.concat([encodeU32(streamId), data]);
 }
 function decodeFwdData(p) {
+  requireLength(p, 4, 'FWD_DATA');
   return { streamId: p.readUInt32BE(0), data: p.subarray(4) };
 }
 // FWD_CLOSE: [ streamId:4 ]  → encodeU32/decodeU32

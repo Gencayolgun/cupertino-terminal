@@ -53,7 +53,8 @@ function base32Encode(buf) {
 }
 
 function base32Decode(str) {
-  const s = str.toUpperCase().replace(/[^A-Z2-7]/g, '');
+  if (typeof str !== 'string' || !/^[A-Z2-7\s-]+$/i.test(str)) throw new Error('Geçersiz Base32 karakter');
+  const s = str.toUpperCase().replace(/[\s-]/g, '');
   let bits = 0, value = 0;
   const output = [];
   for (const c of s) {
@@ -136,7 +137,7 @@ function decrypt(key, packet, expectedCounter) {
   const ct         = packet.subarray(8 + GCM_IV_LEN + GCM_TAG_LEN);
 
   const counter = counterBuf.readBigUInt64BE();
-  if (counter < expectedCounter) throw new Error('Replay saldırısı tespit edildi');
+  if (counter !== expectedCounter) throw new Error('Replay veya sıra bozulması tespit edildi');
 
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv, { authTagLength: GCM_TAG_LEN });
   decipher.setAAD(counterBuf);
@@ -167,7 +168,9 @@ function packAddrs(addrs) {
 }
 
 function unpackAddrs(buf, offset) {
+  if (offset >= buf.length) throw new Error('Adres bölümü eksik');
   const count = buf.readUInt8(offset);
+  if (count > 4 || offset + 1 + count * 6 > buf.length) throw new Error('Adres bölümü geçersiz');
   const addrs = [];
   let o = offset + 1;
   for (let i = 0; i < count; i++) {

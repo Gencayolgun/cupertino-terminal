@@ -1050,6 +1050,13 @@ async function createTab(profileKey = 'default', cwd = null) {
     }
   });
 
+  // Subscribe before spawn so a fast shell cannot lose its initial prompt,
+  // banner, or immediate exit event between createPty() and listener setup.
+  rec.unsubData = window.termAPI.onPtyData(tabId, (data) => term.write(data));
+  rec.unsubExit = window.termAPI.onPtyExit(tabId, (code) => {
+    term.writeln(`\r\n\x1b[90m${t('exited')(code)}\x1b[0m`);
+  });
+
   // ---- PTY olustur ----
   let shellInfo;
   try {
@@ -1092,11 +1099,6 @@ async function createTab(profileKey = 'default', cwd = null) {
     if (tabId === activeTabId) updateWindowTitle();
   });
 
-  rec.unsubData = window.termAPI.onPtyData(tabId, (data) => term.write(data));
-  rec.unsubExit = window.termAPI.onPtyExit(tabId, (code) => {
-    term.writeln(`\r\n\x1b[90m${t('exited')(code)}\x1b[0m`);
-  });
-
   updateTabBarVisibility();
   activateTab(tabId);
 
@@ -1105,6 +1107,7 @@ async function createTab(profileKey = 'default', cwd = null) {
     if (rootIdFor(activeTabId) === rootIdFor(tabId)) fitAddon.fit();
   });
   resizeObserver.observe(paneEl);
+  rec.resizeObserver = resizeObserver;
 
   term.focus();
   scheduleSessionSave();
@@ -1216,6 +1219,7 @@ function destroyTerminalRecord(tabId, t) {
   t.unsubData?.();
   t.unsubExit?.();
   t.zlCli?.destroy();   // ZeroLink CLI temizligi
+  t.resizeObserver?.disconnect();
   t.term.dispose();
   t.tabEl.remove();
   t.paneEl.remove();

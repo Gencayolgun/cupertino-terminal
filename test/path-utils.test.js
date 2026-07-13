@@ -4,13 +4,19 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const os = require('os');
 const path = require('path');
-const { validDirectory, directoryFromDeepLink, directoryFromArgs } = require('../src/path-utils');
+const { validDirectory, directoryForOpenTarget, directoryFromDeepLink, directoryFromArgs } = require('../src/path-utils');
 
 test('validDirectory accepts directories and rejects files/missing input', () => {
   assert.equal(validDirectory(os.tmpdir()), path.resolve(os.tmpdir()));
   assert.equal(validDirectory(__filename), null);
   assert.equal(validDirectory(''), null);
   assert.equal(validDirectory(path.join(os.tmpdir(), 'cupertino-does-not-exist')), null);
+});
+
+test('Finder open-file targets a file parent directory and preserves directories', () => {
+  assert.equal(directoryForOpenTarget(__filename), __dirname);
+  assert.equal(directoryForOpenTarget(os.tmpdir()), path.resolve(os.tmpdir()));
+  assert.equal(directoryForOpenTarget('missing-target'), null);
 });
 
 test('directoryFromDeepLink accepts only terminal and shell schemes', () => {

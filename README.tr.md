@@ -8,7 +8,7 @@ Cupertino Terminal, geliştirici özelliklerinden ödün vermeden özenli bir ma
 
 ## Öne çıkan özellikler
 
-- PowerShell, Komut İstemi, WSL, zsh ve bash algılamalı gerçek PTY oturumları
+- PowerShell, Komut İstemi, WSL, zsh, bash ve fish algılamalı gerçek PTY oturumları
 - On klasik terminal renk profili, ayarlanabilir opaklık ve cam efektleri
 - Sekmeler ile kalıcı dikey/yatay bölünmüş paneller ve sürüklenebilir ayırıcılar
 - Sekme, panel düzeni, çalışma dizini ve pencere durumunu geri yükleme
@@ -80,7 +80,7 @@ npm run dist
 
 ## Kabuk entegrasyonu
 
-Cupertino Terminal desteklenen zsh, bash ve PowerShell oturumlarına entegrasyonunu otomatik olarak ekler. Böylece çalışma dizini, istem sınırları, komut süresi ve çıkış kodu güvenilir biçimde izlenir. Kullanıcının kabuk yapılandırma dosyaları değiştirilmez.
+Cupertino Terminal desteklenen zsh, bash, fish ve PowerShell oturumlarına entegrasyonunu otomatik olarak ekler. Çalışma dosyaları salt-okunur uygulama paketine değil yazılabilir uygulama-verisi dizinine konur. Böylece çalışma dizini, istem sınırları, komut süresi ve çıkış kodu güvenilir biçimde izlenirken kullanıcının kabuk yapılandırma dosyaları değiştirilmez.
 
 Windows üzerinde WSL dağıtımları otomatik algılanır. WSL varsa tercih edilir; yoksa PowerShell kullanılır.
 
@@ -88,7 +88,7 @@ Windows üzerinde WSL dağıtımları otomatik algılanır. WSL varsa tercih edi
 
 ZeroLink iki eş arasında uçtan uca şifreli uzak kabuk oluşturur. `Ctrl/⌘+L` ile özel bir kabuk paylaşabilir veya tek kullanımlık kodla bağlanabilirsiniz. Etkileşimli oturum, terminal boyutlandırma, dosya aktarımı ve yerel port yönlendirme desteklenir.
 
-ZeroLink; geçici ECDH P-256, HKDF ve AES-256-GCM ile tekrar saldırısı koruması kullanır. Bağlantı kodları tek kullanımlıktır ve beş dakika sonra geçersiz olur. Farklı ağlardaki bağlantı NAT koşullarına bağlıdır ve ayrıca yapılandırılmış bir TURN sunucusu gerektirebilir; terminal içeriği relay üzerinden geçse bile şifreli kalır.
+ZeroLink; geçici ECDH P-256, sabitlenmiş handshake anahtarları, HKDF ve AES-256-GCM ile sıkı tekrar/sıra koruması kullanır. Bağlantı kodları tek kullanımlıktır ve beş dakika sonra geçersiz olur. Farklı ağlardaki bağlantı NAT koşullarına bağlıdır ve ayrıca yapılandırılmış bir TURN sunucusu gerektirebilir; terminal içeriği relay üzerinden geçse bile şifreli kalır.
 
 ## Yayın süreci
 
