@@ -291,6 +291,10 @@ class ZeroLinkCLI {
 
   // ── zl share ──────────────────────────────────────────────────────────────
   async _cmdShare(watch) {
+    // Önceki share oturumundan kalan listener'ları temizle (listener leak fix)
+    this._unsubs.forEach(f => f?.());
+    this._unsubs = [];
+
     this._write(`\r\n${cb('⬡ ZeroLink')}  ${p(C.gray, 'hazırlanıyor…')}\r\n`);
     let code;
     try {

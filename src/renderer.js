@@ -808,15 +808,15 @@ document.getElementById('btn-account')?.addEventListener('click', () => {
 // Boylece varsayilan WSL olsa da tek jestte gercek Windows kabugu acilabilir.
 const shellMenuEl = document.getElementById('shell-menu');
 async function showShellMenu(x, y) {
-  if (!shellMenuEl.childElementCount) {
-    const profiles = await window.termAPI.listShells();
-    for (const [key, p] of Object.entries(profiles)) {
-      const item = document.createElement('div');
-      item.className = 'shell-menu-item';
-      item.textContent = p.name;
-      item.addEventListener('click', () => { shellMenuEl.hidden = true; createTab(key); });
-      shellMenuEl.appendChild(item);
-    }
+  // Her açılışta menüyü yeniden oluştur (yeni kurulan shell'leri yakalamak için)
+  shellMenuEl.innerHTML = '';
+  const profiles = await window.termAPI.listShells();
+  for (const [key, p] of Object.entries(profiles)) {
+    const item = document.createElement('div');
+    item.className = 'shell-menu-item';
+    item.textContent = p.name;
+    item.addEventListener('click', () => { shellMenuEl.hidden = true; createTab(key); });
+    shellMenuEl.appendChild(item);
   }
   shellMenuEl.hidden = false;
   // Ekrandan tasmasin
@@ -1109,7 +1109,8 @@ async function createTab(profileKey = 'default', cwd = null) {
   resizeObserver.observe(paneEl);
   rec.resizeObserver = resizeObserver;
 
-  term.focus();
+  // Session restore sırasında focus kaçırma (flicker önleme)
+  if (!restoringSession) term.focus();
   scheduleSessionSave();
 }
 
@@ -1170,11 +1171,13 @@ function activateTab(tabId) {
 function closeTab(tabId) {
   const t = tabs.get(tabId);
   if (!t) return;
-  if (t.shellState?.running && !window.confirm((LANGS[settings.lang] || LANGS.en).closeRunning)) return;
 
+  // Split root kapatılırken hem root hem child çalışan komut varsa tek onay göster
   if (!t.parentId && t.splitChildId) {
     const child = tabs.get(t.splitChildId);
-    if (child?.shellState?.running && !window.confirm((LANGS[settings.lang] || LANGS.en).closeRunning)) return;
+    const anyRunning = t.shellState?.running || child?.shellState?.running;
+    if (anyRunning && !window.confirm((LANGS[settings.lang] || LANGS.en).closeRunning)) return;
+
     if (child) destroyTerminalRecord(t.splitChildId, child);
     t.splitGroup?.remove();
     t.splitGroup = null;
@@ -1182,6 +1185,8 @@ function closeTab(tabId) {
     t.splitDivider = null;
     t.splitDirection = null;
     t.splitRatio = null;
+  } else if (t.shellState?.running && !window.confirm((LANGS[settings.lang] || LANGS.en).closeRunning)) {
+    return;
   }
   if (t.parentId) {
     const root = tabs.get(t.parentId);

@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, Menu, screen, clipboard, dialog, shell } = 
 const path = require('path');
 const os = require('os');
 const Store = require('electron-store');
+const { logger } = require('./modules/error-logger');
 const IS_SMOKE_TEST = process.argv.includes('--smoke-test');
 
 // PTY motoru: @homebridge/node-pty-prebuilt-multiarch — prebuilt N-API binary'leri ile
@@ -77,16 +78,19 @@ const shellProfiles = {
 };
 
 // Bir komut sistemde var mı? (where on Windows, which elsewhere)
+// TTL ile cache: 30 saniye sonra cache geçersiz olur (yeni kurulan shell'leri yakalamak için)
 const _cmdCache = new Map();
+const CMD_CACHE_TTL = 30000; // 30 saniye
 function commandExists(cmd) {
-  if (_cmdCache.has(cmd)) return _cmdCache.get(cmd);
+  const cached = _cmdCache.get(cmd);
+  if (cached !== undefined && Date.now() - cached.ts < CMD_CACHE_TTL) return cached.ok;
   let ok = false;
   try {
     if (process.platform === 'win32') execFileSync('where.exe', [cmd], { timeout: 3000, stdio: 'ignore' });
     else execFileSync('/usr/bin/env', ['sh', '-c', 'command -v "$1"', 'sh', cmd], { timeout: 3000, stdio: 'ignore' });
     ok = true;
   } catch (_) { ok = false; }
-  _cmdCache.set(cmd, ok);
+  _cmdCache.set(cmd, { ok, ts: Date.now() });
   return ok;
 }
 
@@ -249,7 +253,7 @@ function createWindow() {
       } catch (error) {
         console.error('Application smoke test failed:', error);
         store.clear();
-        for (const proc of ptyProcesses.values()) { try { proc.kill(); } catch (_) {} }
+        for (const proc of ptyProcesses.values()) { logger.safeKill(proc, 'smoke-test-cleanup'); }
         await new Promise((resolve) => setTimeout(resolve, 300));
         app.exit(1);
       }
@@ -287,7 +291,7 @@ function createWindow() {
   mainWindow.on('closed', () => {
     if (!IS_SMOKE_TEST) {
       for (const proc of ptyProcesses.values()) {
-        try { proc.kill(); } catch (_) {}
+        logger.safeKill(proc, 'window-closed');
       }
     }
     ptyProcesses.clear();
@@ -341,15 +345,19 @@ function openDirectory(directory) {
 
 // Derin baglanti / URL scheme istegini coz (terminal:// veya shell://)
 // Format: terminal:///path/to/dir  veya  shell:///path
+let pendingDeepLink = null;
+
 function handleDeepLink(url) {
   try {
     // URL'den yolu cikar: terminal:///Users/gencay/Project → /Users/gencay/Project
     const cwd = directoryFromDeepLink(url);
     if (openDirectory(cwd)) return;
   } catch (_) { /* sessiz */ }
-  // App henüz ready değilse createWindow'u çağırma (screen modülü patlar)
-  // whenReady.then(createWindow) zaten arkada çalışıyor
-  if (!app.isReady()) return;
+  // App henüz ready değilse deep link'i kuyruğa al
+  if (!app.isReady()) {
+    pendingDeepLink = url;
+    return;
+  }
   // Pencere yoksa ac, varsa odaklan
   if (!mainWindow) {
     createWindow();
@@ -361,7 +369,14 @@ function handleDeepLink(url) {
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
-else app.whenReady().then(createWindow);
+else app.whenReady().then(() => {
+  createWindow();
+  // Bekleyen deep link'i işle (app ready olmadan gelmişti)
+  if (pendingDeepLink) {
+    handleDeepLink(pendingDeepLink);
+    pendingDeepLink = null;
+  }
+});
 
 // macOS: URL scheme ile acilma (terminal://...)
 app.on('open-url', (event, url) => {
@@ -423,7 +438,7 @@ app.on('before-quit', (event) => {
   if (allowWindowClose || !mainWindow) return;
   event.preventDefault();
   pendingQuit = true;
-  mainWindow.webContents.send('window:close-requested');
+  mainWindow?.webContents?.send('window:close-requested');
 });
 
 app.on('activate', () => {
@@ -560,7 +575,7 @@ ipcMain.handle('pty:create', (event, { tabId, profileKey, cols, rows, cwd: reque
   tabId = normalizeTabId(tabId);
   const dimensions = normalizeDimensions(cols, rows);
   const previous = ptyProcesses.get(tabId);
-  if (previous) { try { previous.kill(); } catch (_) {} ptyProcesses.delete(tabId); }
+  if (previous) { logger.safeKill(previous, 'pty-replace'); ptyProcesses.delete(tabId); }
   const profile = shellProfiles[profileKey] || getDefaultShell();
   const cwd = validDirectory(requestedCwd) || launchCwd || os.homedir();
   launchCwd = null;
@@ -596,7 +611,7 @@ ipcMain.on('pty:write', (event, { tabId, data }) => {
   try {
     const input = normalizePtyInput(data);
     if (input !== null) ptyProcesses.get(normalizeTabId(tabId))?.write(input);
-  } catch (_) {}
+  } catch (err) { logger.warn('PTY write failed', err); }
 });
 
 ipcMain.on('pty:resize', (event, { tabId, cols, rows }) => {
@@ -605,14 +620,14 @@ ipcMain.on('pty:resize', (event, { tabId, cols, rows }) => {
   const proc = ptyProcesses.get(id);
   if (proc) {
     const dimensions = normalizeDimensions(cols, rows);
-    try { proc.resize(dimensions.cols, dimensions.rows); } catch (_) {}
+    logger.safeResize(proc, dimensions.cols, dimensions.rows, 'pty-resize');
   }
 });
 
 ipcMain.on('pty:kill', (event, { tabId }) => {
   let id;
   try { id = normalizeTabId(tabId); } catch (_) { return; }
-  try { ptyProcesses.get(id)?.kill(); } catch (_) {}
+  logger.safeKill(ptyProcesses.get(id), 'pty-kill');
   ptyProcesses.delete(id);
 });
 
@@ -707,13 +722,22 @@ function makeSessionSpawner() {
       cwd: os.homedir(),
       env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', LANG: process.env.LANG || 'en_US.UTF-8' },
     });
+
+    // ZeroLink session PTY'lerini takip et (pencere kapatıldığında öldürmek için)
+    const zlSessionId = `zl-session-${proc.pid}`;
+    ptyProcesses.set(zlSessionId, proc);
+    proc.onExit(() => ptyProcesses.delete(zlSessionId));
+
     return {
       pid: proc.pid,
       onData: (cb) => proc.onData(cb),   // {dispose} döner
       onExit: (cb) => proc.onExit(cb),
       write:  (d)  => proc.write(d),
-      resize: (c, r) => { try { proc.resize(c, r); } catch (_) {} },
-      kill:   () => { try { proc.kill(); } catch (_) {} },
+      resize: (c, r) => logger.safeResize(proc, c, r, 'zerolink-session'),
+      kill:   () => {
+        logger.safeKill(proc, 'zerolink-session');
+        ptyProcesses.delete(zlSessionId);
+      },
     };
   };
 }

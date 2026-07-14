@@ -31,7 +31,7 @@ export function serializeSession(records, activeId) {
         cwd: rec.shellState?.cwd || null,
         ...(child ? { split: {
           direction: rec.splitDirection || 'vertical',
-          ratio: rec.splitRatio || 50,
+          ratio: rec.splitRatio ?? 50,  // nullish coalescing: 0 değerini korur
           profileKey: child.profileKey || 'default',
           cwd: child.shellState?.cwd || null,
         } } : {}),
