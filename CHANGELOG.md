@@ -8,8 +8,11 @@
   - Fix: the code now embeds an additional random 16-byte pairing key. The handshake packet carries an HMAC-SHA256 proof computed from it; both sides verify the proof before deriving session keys or starting a session. A connection that completes WebRTC negotiation without a valid proof is closed immediately, never reaches `'connected'`, and no shell is ever spawned for it.
   - **This changes the ZeroLink code and handshake wire format.** Hosts and clients must both be on 0.5.0+; older and newer versions cannot connect to each other.
 
+### Dependencies
+- Fixed a high-severity `fast-uri` host-confusion advisory (GHSA-v2hh-gcrm-f6hx) picked up by real CI's `npm audit --audit-level=high` — unrelated to the ZeroLink fix above, found while confirming this release on actual GitHub Actions runners.
+
 ### Verification
-- 30 regression tests (5 new, covering the pairing-key round-trip and the exact attack this fix closes), `tsc --noEmit`, full syntax check.
+- 30 regression tests (5 new, covering the pairing-key round-trip and the exact attack this fix closes), `tsc --noEmit`, full syntax check, and a live end-to-end simulation (real host + real attacker peer completing full WebRTC/DTLS negotiation with a wrong pairing key). Confirmed green on real GitHub Actions CI (windows-latest + macos-15), not just locally.
 
 ## 0.4.0 — 2026-07-13
 
