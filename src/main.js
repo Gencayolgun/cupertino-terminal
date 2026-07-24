@@ -210,11 +210,14 @@ function createWindow() {
             };
           })()`);
         } while ((result.tabCount !== 2 || result.cwdCount !== 2 || result.terminalCount !== 3) && Date.now() < deadline);
+        // App shortcuts use Cmd on macOS (Ctrl passes to the shell) and Ctrl elsewhere,
+        // so the smoke must press the platform's real app-modifier or search/palette won't open.
+        const smokeMod = IS_MAC ? 'metaKey: true' : 'ctrlKey: true';
         const uiChecks = await mainWindow.webContents.executeJavaScript(`(() => {
           const target = document.activeElement || document.body;
-          target.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true }));
+          target.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ${smokeMod}, bubbles: true }));
           const searchOpened = !document.getElementById('search-bar').hidden;
-          target.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, shiftKey: true, bubbles: true }));
+          target.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ${smokeMod}, shiftKey: true, bubbles: true }));
           return {
             searchOpened,
             paletteOpened: !document.getElementById('command-palette-overlay').hidden
