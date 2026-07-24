@@ -1,10 +1,12 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
 
 const appWindow = getCurrentWindow();
 const noop = () => {};
 const noopSubscription = () => noop;
-const unsupported = (feature) => Promise.reject(new Error(`${feature} is not available in Rock 0`));
+const unsupported = (feature) => Promise.reject(new Error(`${feature} arrives in a later Tauri build`));
 const closeRequested = new Set();
 const ptyData = new Map();
 const ptyExit = new Map();
@@ -30,6 +32,19 @@ function tauriWindowSubscription(register, callback) {
     if (disposed) fn();
     else unlisten = fn;
   }).catch((error) => console.warn('Tauri window event subscription failed:', error));
+  return () => {
+    disposed = true;
+    unlisten?.();
+  };
+}
+
+function tauriEventSubscription(eventName, callback) {
+  let disposed = false;
+  let unlisten = null;
+  listen(eventName, (event) => callback(event.payload)).then((fn) => {
+    if (disposed) fn();
+    else unlisten = fn;
+  }).catch((error) => console.warn(`Tauri event subscription failed (${eventName}):`, error));
   return () => {
     disposed = true;
     unlisten?.();
@@ -103,15 +118,22 @@ window.termAPI = Object.freeze({
   onPtyData: (tabId, callback) => subscribe(ptyData, tabId, callback),
   onPtyExit: (tabId, callback) => subscribe(ptyExit, tabId, callback),
 
-  clipboardWrite: (text) => navigator.clipboard?.writeText(String(text)).catch(noop),
-  clipboardRead: () => navigator.clipboard?.readText().catch(() => '') ?? Promise.resolve(''),
+  clipboardWrite: (text) => writeText(String(text)).catch((error) => {
+    console.warn('Clipboard write failed:', error);
+  }),
+  clipboardRead: () => readText().catch((error) => {
+    console.warn('Clipboard read failed:', error);
+    return '';
+  }),
   openExternal: (url) => invoke('open_external', { url }).catch((error) => console.warn(error)),
 
-  ncAccountStatus: () => Promise.resolve({ loggedIn: false, email: null }),
-  ncAccountSendOtp: () => unsupported('NatureCo account'),
-  ncAccountVerify: () => unsupported('NatureCo account'),
-  ncAccountPassword: () => unsupported('NatureCo account'),
-  ncAccountLogout: noop,
+  ncAccountStatus: () => invoke('nc_account_status'),
+  ncAccountSendOtp: (email) => invoke('nc_account_send_otp', { email }),
+  ncAccountVerify: (email, value) => invoke('nc_account_verify', { email, value }),
+  ncAccountPassword: (email, password) => invoke('nc_account_password', { email, password }),
+  ncAccountLogout: () => invoke('nc_account_logout').catch((error) => {
+    console.warn('NatureCo account logout failed:', error);
+  }),
 
   checkForUpdates: noop,
   installUpdate: noop,
@@ -129,15 +151,17 @@ window.termAPI = Object.freeze({
     (handler) => appWindow.onResized(async () => handler({ payload: await appWindow.isMaximized() })),
     callback,
   ),
-  onOpenDirectory: noopSubscription,
-  onNewTab: noopSubscription,
-  onCloseTab: noopSubscription,
-  onShowSettings: noopSubscription,
+  onOpenDirectory: (callback) => tauriEventSubscription('app:open-directory', callback),
+  onNewTab: (callback) => tauriEventSubscription('app:new-tab', callback),
+  onCloseTab: (callback) => tauriEventSubscription('app:close-tab', callback),
+  onShowSettings: (callback) => tauriEventSubscription('app:show-settings', callback),
   onCloseRequested: (callback) => {
     closeRequested.add(callback);
     return () => closeRequested.delete(callback);
   },
-  onSmokeCommand: noopSubscription,
+  onSmokeCommand: (callback) => tauriEventSubscription('app:smoke-command', callback),
+
+  completeSmokeTest: (result) => invoke('complete_smoke_test', { result }),
 
   zlHostStart: () => unsupported('ZeroLink'),
   zlHostStop: noop,

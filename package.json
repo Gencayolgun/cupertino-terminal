@@ -31,6 +31,7 @@
     "check": "node --check src/main.js && node --check src/preload.js && node --check src/renderer.js && npm test",
     "smoke:native": "electron scripts/smoke-native.js",
     "smoke:app": "electron . --smoke-test",
+    "smoke:tauri": "node scripts/smoke-tauri.js",
     "perf:pty": "electron scripts/benchmark-pty.js",
     "typecheck": "tsc --noEmit",
     "typecheck:watch": "tsc --noEmit --watch"
@@ -38,6 +39,7 @@
   "dependencies": {
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-web-links": "^0.12.0",

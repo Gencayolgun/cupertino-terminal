@@ -1,19 +1,33 @@
+#[cfg_attr(test, allow(dead_code))]
+mod account;
 mod pty;
 
 #[cfg(not(test))]
 mod app {
-    use super::pty::{self, PtyState};
+    use super::{
+        account::{AccountEmail, AccountError, AccountService, AccountStatus},
+        pty::{self, PtyState},
+    };
+    use percent_encoding::percent_decode_str;
     use serde_json::{json, Map, Value};
     use std::{
-        fs,
+        env, fs,
         path::{Path, PathBuf},
         sync::Mutex,
+        time::Duration,
     };
-    use tauri::{Manager, State};
+    use tauri::{Emitter, Manager, State};
+    use tauri_plugin_deep_link::DeepLinkExt;
+    use url::Url;
 
     struct StoreState {
         path: PathBuf,
         lock: Mutex<()>,
+    }
+
+    struct BootState {
+        cwd: Mutex<Option<PathBuf>>,
+        smoke_test: bool,
     }
 
     fn read_store(path: &Path) -> Map<String, Value> {
@@ -126,6 +140,7 @@ mod app {
     fn get_caps() -> Value {
         json!({
             "acrylic": cfg!(target_os = "windows"),
+            "runtime": "tauri",
             "platform": if cfg!(target_os = "windows") {
                 "win32"
             } else if cfg!(target_os = "macos") {
@@ -138,8 +153,14 @@ mod app {
     }
 
     #[tauri::command]
-    fn get_boot_context() -> Value {
-        json!({ "cwd": Value::Null })
+    fn get_boot_context(state: State<'_, BootState>) -> Value {
+        let cwd = state
+            .cwd
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned());
+        json!({ "cwd": cwd, "smokeTest": state.smoke_test })
     }
 
     #[tauri::command]
@@ -188,17 +209,262 @@ mod app {
         Ok(())
     }
 
+    #[tauri::command]
+    async fn nc_account_status(
+        account: State<'_, AccountService>,
+    ) -> Result<AccountStatus, AccountError> {
+        Ok(account.status().await)
+    }
+
+    #[tauri::command]
+    async fn nc_account_send_otp(
+        email: String,
+        account: State<'_, AccountService>,
+    ) -> Result<Value, AccountError> {
+        account.send_otp(email).await?;
+        Ok(json!({ "ok": true }))
+    }
+
+    #[tauri::command]
+    async fn nc_account_verify(
+        email: String,
+        value: String,
+        account: State<'_, AccountService>,
+    ) -> Result<AccountEmail, AccountError> {
+        account.verify(email, value).await
+    }
+
+    #[tauri::command]
+    async fn nc_account_password(
+        email: String,
+        password: String,
+        account: State<'_, AccountService>,
+    ) -> Result<AccountEmail, AccountError> {
+        account.login_with_password(email, password).await
+    }
+
+    #[tauri::command]
+    fn nc_account_logout(account: State<'_, AccountService>) -> Result<(), AccountError> {
+        account.logout()
+    }
+
+    #[tauri::command]
+    fn complete_smoke_test(result: Value, app: tauri::AppHandle) -> Result<(), String> {
+        let xterm = result
+            .get("xterm")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let tab_count = result
+            .get("tabCount")
+            .and_then(Value::as_u64)
+            .unwrap_or_default();
+        let terminal_count = result
+            .get("terminalCount")
+            .and_then(Value::as_u64)
+            .unwrap_or_default();
+        let live_count = result
+            .get("liveCount")
+            .and_then(Value::as_u64)
+            .unwrap_or_default();
+        let theme = result
+            .get("theme")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !xterm || tab_count == 0 || terminal_count == 0 || live_count == 0 || theme.is_empty() {
+            let message = format!(
+                "Tauri smoke test failed: xterm={xterm}, tabs={tab_count}, terminals={terminal_count}, live={live_count}, theme={theme:?}"
+            );
+            eprintln!("{message}");
+            app.exit(1);
+            return Err(message);
+        }
+        println!(
+            "Tauri smoke test passed (xterm present, {tab_count} tab, {terminal_count} terminal, live PTY, theme {theme})"
+        );
+        app.exit(0);
+        Ok(())
+    }
+
+    fn canonical_directory(path: impl AsRef<Path>) -> Option<PathBuf> {
+        fs::canonicalize(path).ok().filter(|path| path.is_dir())
+    }
+
+    fn directory_from_deep_link(value: &str) -> Option<PathBuf> {
+        let url = Url::parse(value).ok()?;
+        if !matches!(url.scheme(), "terminal" | "shell") {
+            return None;
+        }
+        let decoded = percent_decode_str(url.path()).decode_utf8().ok()?;
+        let mut path = decoded.into_owned();
+        #[cfg(windows)]
+        if path.starts_with('/') && path.as_bytes().get(2).is_some_and(|byte| *byte == b':') {
+            path.remove(0);
+        }
+        canonical_directory(path)
+    }
+
+    fn directory_from_args(args: &[String], cwd: Option<&Path>) -> Option<PathBuf> {
+        args.iter().skip(1).find_map(|argument| {
+            if argument.starts_with('-') || argument.contains("://") {
+                return None;
+            }
+            let path = PathBuf::from(argument);
+            let path = if path.is_relative() {
+                cwd.map_or(path.clone(), |cwd| cwd.join(path))
+            } else {
+                path
+            };
+            canonical_directory(path)
+        })
+    }
+
+    fn directory_from_launch(args: &[String], cwd: Option<&Path>) -> Option<PathBuf> {
+        args.iter()
+            .find_map(|argument| directory_from_deep_link(argument))
+            .or_else(|| directory_from_args(args, cwd))
+    }
+
+    fn deliver_directory(app: &tauri::AppHandle, directory: PathBuf) {
+        if let Some(state) = app.try_state::<BootState>() {
+            *state.cwd.lock().unwrap_or_else(|error| error.into_inner()) = Some(directory.clone());
+        }
+        let _ = app.emit_to(
+            "main",
+            "app:open-directory",
+            directory.to_string_lossy().into_owned(),
+        );
+    }
+
+    fn focus_main_window(app: &tauri::AppHandle) {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn application_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+        use tauri::menu::{
+            Menu, MenuItem, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID, WINDOW_SUBMENU_ID,
+        };
+
+        let settings = MenuItem::with_id(app, "show-settings", "Settings…", true, Some("Cmd+,"))?;
+        let app_menu = Submenu::with_items(
+            app,
+            "Cupertino Terminal",
+            true,
+            &[
+                &PredefinedMenuItem::about(app, None, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &settings,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::services(app, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::hide(app, None)?,
+                &PredefinedMenuItem::hide_others(app, None)?,
+                &PredefinedMenuItem::show_all(app, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::quit(app, None)?,
+            ],
+        )?;
+        let new_tab = MenuItem::with_id(app, "new-tab", "New Tab", true, Some("Cmd+T"))?;
+        let close_tab = MenuItem::with_id(app, "close-tab", "Close Tab", true, Some("Cmd+W"))?;
+        let file_menu = Submenu::with_items(app, "File", true, &[&new_tab, &close_tab])?;
+        let edit_menu = Submenu::with_items(
+            app,
+            "Edit",
+            true,
+            &[
+                &PredefinedMenuItem::copy(app, None)?,
+                &PredefinedMenuItem::paste(app, None)?,
+                &PredefinedMenuItem::select_all(app, None)?,
+            ],
+        )?;
+        let view_menu = Submenu::with_items(
+            app,
+            "View",
+            true,
+            &[&PredefinedMenuItem::fullscreen(app, None)?],
+        )?;
+        let window_menu = Submenu::with_id_and_items(
+            app,
+            WINDOW_SUBMENU_ID,
+            "Window",
+            true,
+            &[
+                &PredefinedMenuItem::minimize(app, None)?,
+                &PredefinedMenuItem::maximize(app, Some("Zoom"))?,
+                &PredefinedMenuItem::close_window(app, Some("Close Window"))?,
+            ],
+        )?;
+        let help_menu = Submenu::with_id_and_items(app, HELP_SUBMENU_ID, "Help", true, &[])?;
+        Menu::with_items(
+            app,
+            &[
+                &app_menu,
+                &file_menu,
+                &edit_menu,
+                &view_menu,
+                &window_menu,
+                &help_menu,
+            ],
+        )
+    }
+
     pub fn run() {
-        tauri::Builder::default()
-            .setup(|app| {
+        let smoke_test = env::args().any(|argument| argument == "--smoke-test");
+        let initial_args: Vec<String> = env::args().collect();
+        let initial_cwd = env::current_dir().ok();
+        let launch_directory = directory_from_launch(&initial_args, initial_cwd.as_deref());
+
+        #[allow(unused_mut)]
+        let mut builder = tauri::Builder::default()
+            .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+                if !args.iter().any(|argument| {
+                    argument.starts_with("terminal://") || argument.starts_with("shell://")
+                }) {
+                    if let Some(directory) = directory_from_args(&args, Some(Path::new(&cwd))) {
+                        deliver_directory(app, directory);
+                    }
+                }
+                focus_main_window(app);
+            }))
+            .plugin(tauri_plugin_clipboard_manager::init())
+            .plugin(tauri_plugin_deep_link::init());
+        #[cfg(target_os = "macos")]
+        {
+            builder = builder.menu(application_menu);
+        }
+        builder
+            .on_menu_event(|app, event| {
+                let name = match event.id().as_ref() {
+                    "new-tab" => Some("app:new-tab"),
+                    "close-tab" => Some("app:close-tab"),
+                    "show-settings" => Some("app:show-settings"),
+                    _ => None,
+                };
+                if let Some(name) = name {
+                    let _ = app.emit_to("main", name, ());
+                }
+            })
+            .setup(move |app| {
                 let data_dir = app.path().app_data_dir()?;
                 fs::create_dir_all(&data_dir)?;
                 app.manage(StoreState {
                     path: data_dir.join("store.json"),
                     lock: Mutex::new(()),
                 });
+                app.manage(BootState {
+                    cwd: Mutex::new(launch_directory),
+                    smoke_test,
+                });
+                app.manage(AccountService::from_environment());
                 let pty_state = PtyState::default();
                 if let Some(window) = app.get_webview_window("main") {
+                    if smoke_test {
+                        let _ = window.hide();
+                    }
                     let close_state = pty_state.clone();
                     window.on_window_event(move |event| {
                         if matches!(event, tauri::WindowEvent::Destroyed) {
@@ -207,6 +473,38 @@ mod app {
                     });
                 }
                 app.manage(pty_state);
+
+                let deep_link_handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        if let Some(directory) = directory_from_deep_link(url.as_str()) {
+                            deliver_directory(&deep_link_handle, directory);
+                            break;
+                        }
+                    }
+                    focus_main_window(&deep_link_handle);
+                });
+                if let Some(urls) = app.deep_link().get_current()? {
+                    for url in urls {
+                        if let Some(directory) = directory_from_deep_link(url.as_str()) {
+                            deliver_directory(app.handle(), directory);
+                            break;
+                        }
+                    }
+                }
+                #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
+                app.deep_link().register_all()?;
+
+                if smoke_test {
+                    let handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_secs(20));
+                        eprintln!(
+                            "Tauri smoke test failed: renderer did not report within 20 seconds"
+                        );
+                        handle.exit(1);
+                    });
+                }
                 Ok(())
             })
             .invoke_handler(tauri::generate_handler![
@@ -227,6 +525,12 @@ mod app {
                 pty::pty_ack,
                 relaunch_app,
                 open_external,
+                nc_account_status,
+                nc_account_send_otp,
+                nc_account_verify,
+                nc_account_password,
+                nc_account_logout,
+                complete_smoke_test,
             ])
             .run(tauri::generate_context!())
             .expect("error while running Cupertino Terminal");

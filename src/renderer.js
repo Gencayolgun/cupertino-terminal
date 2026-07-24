@@ -1437,7 +1437,14 @@ const zlOverlayEl = document.getElementById('zl-overlay');
 const zlL = () => LANGS[settings.lang] || LANGS.en;
 
 function toggleZeroLink() { zlOverlayEl.hidden ? openZeroLink() : closeZeroLink(); }
-function openZeroLink()   { zlResetToModeSelect(); zlOverlayEl.hidden = false; }
+function openZeroLink() {
+  zlResetToModeSelect();
+  if (window.__TAURI_INTERNALS__) {
+    document.getElementById('zl-mode-select').hidden = true;
+    zlShowError('ZeroLink arrives in a later build.');
+  }
+  zlOverlayEl.hidden = false;
+}
 function closeZeroLink()  { zlOverlayEl.hidden = true; tabs.get(activeTabId)?.term.focus(); }
 
 document.getElementById('btn-zerolink').addEventListener('click', toggleZeroLink);
@@ -1967,6 +1974,18 @@ async function boot() {
     scheduleSessionSave();
   } else {
     await createTab();
+  }
+
+  if (bootContext?.smokeTest && typeof window.termAPI.completeSmokeTest === 'function') {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const theme = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+    await window.termAPI.completeSmokeTest({
+      xterm: !!document.querySelector('.xterm-screen'),
+      tabCount: document.querySelectorAll('.tab').length,
+      terminalCount: document.querySelectorAll('.xterm').length,
+      liveCount: document.querySelectorAll('.tab[data-cwd]').length,
+      theme,
+    });
   }
 }
 boot();
