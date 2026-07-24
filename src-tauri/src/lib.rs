@@ -465,7 +465,7 @@ mod app {
                 });
                 app.manage(AccountService::from_environment());
                 app.manage(ZeroLinkState::default());
-                let pty_state = PtyState::default();
+                let pty_state = PtyState::new(data_dir);
                 if let Some(window) = app.get_webview_window("main") {
                     if smoke_test {
                         let _ = window.hide();

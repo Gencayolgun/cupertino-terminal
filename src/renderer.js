@@ -9,6 +9,7 @@ import { ShellState, parseOsc7 } from './shell-state.mjs';
 import { normalizeSession, serializeSession } from './session-state.mjs';
 import { filterCommands } from './command-palette.mjs';
 import { consumePromptInput, normalizeHistory } from './command-history.mjs';
+import { appModifier } from './keymap.mjs';
 import './zerolink-cli.js'; // ZeroLinkCLI global'e yuklenir (window.ZeroLinkCLI)
 
 const ZeroLinkCLI = window.ZeroLinkCLI;
@@ -258,7 +259,7 @@ const LANGS = {
     acrylicReq: 'Blurred glass requires Windows 11 22H2 or later',
     text: 'Text', fontSize: 'Font size', cursor: 'Cursor',
     block: 'Block', underline: 'Underline', bar: 'Vertical bar',
-    blink: 'Blink cursor',
+    blink: 'Blink cursor', optionMeta: 'Use Option as Meta',
     shell: 'Shell', defaultShell: 'Default shell',
     autoShell: 'Automatic (WSL if available)',
     shellHint: 'Shell changes take effect in new tabs.',
@@ -405,6 +406,7 @@ function applyLanguage() {
   set('#lbl-fontsize', 'textContent', L.fontSize);
   set('#lbl-cursor', 'textContent', L.cursor);
   set('#lbl-blink', 'textContent', L.blink);
+  set('#lbl-option-meta', 'textContent', L.optionMeta || LANGS.en.optionMeta);
   set('#lbl-shell', 'textContent', L.defaultShell);
   set('#lbl-language', 'textContent', L.uiLanguage);
   set('#opacity-reset', 'textContent', L.auto);
@@ -481,9 +483,12 @@ const DEFAULT_SETTINGS = {
   opacity: null,        // null = profil varsayilani (Otomatik); 0-1 arasi kullanici degeri
   glass: 'acrylic',     // 'acrylic' = bugulu blur; 'clear' = kristal net (pencere yeniden olusur)
   gpuRenderer: false,
+  macOptionIsMeta: false,
   lang: null,           // null = ilk acilista sistem dilinden sec (tr → Turkce, digerleri → Ingilizce)
 };
 let settings = { ...DEFAULT_SETTINGS };
+let isMac = false;
+const isTauri = Boolean(window.__TAURI_INTERNALS__);
 
 function currentTheme() {
   return THEMES[settings.profile] || THEMES.pro;
@@ -510,6 +515,7 @@ function applySettings({ save = true } = {}) {
     t.term.options.fontSize = settings.fontSize;
     t.term.options.cursorStyle = settings.cursorStyle;
     t.term.options.cursorBlink = settings.cursorBlink;
+    if (isMac) t.term.options.macOptionIsMeta = settings.macOptionIsMeta === true;
   }
   const active = tabs.get(activeTabId);
   if (active) active.fitAddon.fit(); // yazi boyutu degisince satir/sutun sayisi degisir
@@ -840,6 +846,9 @@ window.termAPI.onFocusChange((focused) => {
 window.termAPI.onMaximizeChange((maximized) => {
   document.body.classList.toggle('maximized', maximized);
 });
+window.termAPI.onFullscreenChange?.((fullscreen) => {
+  document.body.classList.toggle('fullscreen', fullscreen);
+});
 
 /**
  * OSC basliklarini macOS surec-adi tarzina cevirir. Windows kabuklari basliga
@@ -899,10 +908,11 @@ async function createTab(profileKey = 'default', cwd = null) {
     lineHeight: 1.15,
     cursorBlink: settings.cursorBlink,
     cursorStyle: settings.cursorStyle,
+    cursorInactiveStyle: 'outline',
     theme: terminalTheme(),
     allowTransparency: true,
     scrollback: 5000,
-    macOptionIsMeta: true,
+    macOptionIsMeta: isMac && settings.macOptionIsMeta === true,
   });
 
   const fitAddon = new FitAddon();
@@ -995,7 +1005,7 @@ async function createTab(profileKey = 'default', cwd = null) {
     const zlCli = rec.zlCli;
     if (zlCli && zlCli.isCapturing()) return zlCli.handleKey(e);
 
-    const mod = e.ctrlKey || e.metaKey;
+    const mod = appModifier(e, isMac);
     const k = e.key.toLowerCase();
 
     // ZeroLink panelini ac/kapat: Ctrl+L
@@ -1014,9 +1024,13 @@ async function createTab(profileKey = 'default', cwd = null) {
       // Ayarlar: Ctrl+, (macOS Cmd+, muadili)
       if (k === ',') { toggleSettings(); return false; }
 
-      // KOPYALA: Ctrl+C — metin seciliyse kopyalar (+secimi temizler),
-      // secili degilse calisan komutu durdurur (^C/SIGINT). Shift YOK.
+      // macOS uses Cmd+C only for a selection; Ctrl+C always reaches the PTY.
+      // Windows/Linux retain copy-when-selected, otherwise SIGINT.
       if (k === 'c') {
+        if (isMac && !term.hasSelection()) {
+          e.preventDefault();
+          return false;
+        }
         if (term.hasSelection()) {
           e.preventDefault(); // xterm/tarayicinin kendi 'copy' olayini da iptal et → CIFT kopyalama olmasin
           window.termAPI.clipboardWrite(term.getSelection());
@@ -1026,13 +1040,13 @@ async function createTab(profileKey = 'default', cwd = null) {
         return true; // secim yok → SIGINT pty'ye gitsin
       }
 
-      // YAPISTIR: Ctrl+V — kendi paste cagrimizi YAPMIYORUZ (yoksa xterm'in native paste'i
-      // ile birlesip metin iki kez gidiyor: "selamselam"). Sadece `false` donuyoruz:
-      //   • false → xterm Ctrl+V'yi \x16 kontrol karakteri olarak pty'ye GONDERMEZ
-      //   • ama tarayicinin native 'paste' olayini ENGELLEMEZ → gercek yapistirmayi
-      //     xterm'in kendi native paste'i TEK seferde yapar.
-      // (Sag-tik ile yapistirma ayri: contextmenu handler'inda, o da tek seferlik.)
+      // Tauri reads its clipboard explicitly and lets xterm encode bracketed paste.
+      // Electron keeps its existing single native Chromium paste event.
       if (k === 'v') {
+        if (isTauri) {
+          e.preventDefault();
+          window.termAPI.clipboardRead().then((txt) => { if (txt) term.paste(txt); });
+        }
         return false;
       }
 
@@ -1054,7 +1068,11 @@ async function createTab(profileKey = 'default', cwd = null) {
       window.termAPI.clipboardWrite(term.getSelection());
       term.clearSelection();
     } else {
-      window.termAPI.clipboardRead().then((txt) => { if (txt) window.termAPI.writePty(tabId, txt); });
+      window.termAPI.clipboardRead().then((txt) => {
+        if (!txt) return;
+        if (isTauri) term.paste(txt);
+        else window.termAPI.writePty(tabId, txt);
+      });
     }
   });
 
@@ -1247,6 +1265,7 @@ const opacitySliderEl = document.getElementById('opacity-slider');
 const opacityValueEl = document.getElementById('opacity-value');
 const cursorStyleEl = document.getElementById('cursor-style');
 const cursorBlinkEl = document.getElementById('cursor-blink');
+const macOptionMetaEl = document.getElementById('mac-option-meta');
 const shellSelectEl = document.getElementById('set-shell');
 
 function toggleSettings() {
@@ -1275,6 +1294,7 @@ function syncSettingsUI() {
     btn.classList.toggle('selected', btn.dataset.style === settings.cursorStyle);
   }
   cursorBlinkEl.checked = settings.cursorBlink;
+  macOptionMetaEl.checked = settings.macOptionIsMeta === true;
   shellSelectEl.value = settings.shell;
   for (const btn of document.querySelectorAll('#glass-mode button')) {
     btn.classList.toggle('selected', btn.dataset.glass === (settings.glass || 'acrylic'));
@@ -1370,6 +1390,10 @@ function buildSettingsUI() {
     settings.cursorBlink = cursorBlinkEl.checked;
     applySettings();
   });
+  macOptionMetaEl.addEventListener('change', () => {
+    settings.macOptionIsMeta = macOptionMetaEl.checked;
+    applySettings();
+  });
 
   // Kabuk secenekleri main surecinden gelir (WSL/PowerShell/cmd)
   window.termAPI.listShells().then((profiles) => {
@@ -1410,7 +1434,7 @@ function buildSettingsUI() {
 // edersek panel acilip ANINDA kapanir. Bu yuzden xterm icinden gelen olayi atlariz.
 window.addEventListener('keydown', (e) => {
   const fromTerminal = e.target && e.target.closest && e.target.closest('.xterm');
-  if (!fromTerminal && (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'p') {
+  if (!fromTerminal && appModifier(e, isMac) && e.shiftKey && e.key.toLowerCase() === 'p') {
     e.preventDefault();
     if (commandPaletteOverlayEl.hidden) openCommandPalette(); else closeCommandPalette();
     return;
@@ -1418,13 +1442,13 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !commandPaletteOverlayEl.hidden) { closeCommandPalette(); return; }
   if (e.key === 'Escape' && !overlayEl.hidden) { closeSettings(); return; }
   if (e.key === 'Escape' && !zlOverlayEl.hidden) { closeZeroLink(); return; }
-  if (!fromTerminal && (e.ctrlKey || e.metaKey) && e.key === ',') {
+  if (!fromTerminal && appModifier(e, isMac) && e.key === ',') {
     e.preventDefault();
     toggleSettings();
   }
   // Ctrl+L: terminal DISINDA (panel/input odaktayken) ZeroLink'i ac/kapat.
   // Terminal odaktayken xterm'in birlesik handler'i zaten isler → cift toggle olmasin.
-  if (!fromTerminal && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
+  if (!fromTerminal && appModifier(e, isMac) && e.key.toLowerCase() === 'l') {
     e.preventDefault();
     toggleZeroLink();
   }
@@ -1924,9 +1948,11 @@ const _ncRefreshAccount = (() => {
 
 // Gomulu fontu xterm ilk olcumden ONCE yukle (yoksa glyph metrigi kayar), sonra ilk sekme.
 async function boot() {
+  document.body.classList.toggle('platform-tauri', isTauri);
   try {
     const caps = await window.termAPI.getCaps();
-    document.body.classList.toggle('platform-mac', caps?.platform === 'darwin');
+    isMac = caps?.platform === 'darwin';
+    document.body.classList.toggle('platform-mac', isMac);
   } catch (_) { /* platform sinifi zorunlu degil */ }
   try {
     const saved = await window.termAPI.getSettings();

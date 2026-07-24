@@ -160,6 +160,15 @@ window.termAPI = Object.freeze({
     (handler) => appWindow.onResized(async () => handler({ payload: await appWindow.isMaximized() })),
     callback,
   ),
+  onFullscreenChange: (callback) => {
+    appWindow.isFullscreen().then(callback).catch((error) => {
+      console.warn('Tauri fullscreen state query failed:', error);
+    });
+    return tauriWindowSubscription(
+      (handler) => appWindow.onResized(async () => handler({ payload: await appWindow.isFullscreen() })),
+      callback,
+    );
+  },
   onOpenDirectory: (callback) => tauriEventSubscription('app:open-directory', callback),
   onNewTab: (callback) => tauriEventSubscription('app:new-tab', callback),
   onCloseTab: (callback) => tauriEventSubscription('app:close-tab', callback),

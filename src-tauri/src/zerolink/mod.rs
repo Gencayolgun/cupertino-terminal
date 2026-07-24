@@ -314,9 +314,7 @@ mod service {
                 let (host, port) = parse_target(&target)?;
                 let stream = TcpStream::connect((host.as_str(), port)).await?;
                 let (mut reader, writer) = stream.into_split();
-                async_tx
-                    .send(HostAsync::ForwardWriter(id, writer))
-                    .await?;
+                async_tx.send(HostAsync::ForwardWriter(id, writer)).await?;
                 let peer = peer.clone();
                 tauri::async_runtime::spawn(async move {
                     let mut buffer = vec![0_u8; 16 * 1024];
