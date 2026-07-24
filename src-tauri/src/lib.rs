@@ -333,7 +333,12 @@ mod app {
             return None;
         }
         let decoded = percent_decode_str(url.path()).decode_utf8().ok()?;
+        // `mut` is only needed on Windows, where a leading-slash drive path (/C:/...) is trimmed;
+        // gate it per-platform so non-Windows targets don't warn about an unused `mut`.
+        #[cfg(windows)]
         let mut path = decoded.into_owned();
+        #[cfg(not(windows))]
+        let path = decoded.into_owned();
         #[cfg(windows)]
         if path.starts_with('/') && path.as_bytes().get(2).is_some_and(|byte| *byte == b':') {
             path.remove(0);
