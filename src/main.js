@@ -212,16 +212,22 @@ function createWindow() {
         } while ((result.tabCount !== 2 || result.cwdCount !== 2 || result.terminalCount !== 3) && Date.now() < deadline);
         // App shortcuts use Cmd on macOS (Ctrl passes to the shell) and Ctrl elsewhere,
         // so the smoke must press the platform's real app-modifier or search/palette won't open.
+        // The command palette is lazy-loaded (dynamic import), so poll for it to appear rather
+        // than reading its hidden state synchronously right after the keystroke.
         const smokeMod = IS_MAC ? 'metaKey: true' : 'ctrlKey: true';
-        const uiChecks = await mainWindow.webContents.executeJavaScript(`(() => {
+        const uiChecks = await mainWindow.webContents.executeJavaScript(`(async () => {
           const target = document.activeElement || document.body;
-          target.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ${smokeMod}, bubbles: true }));
-          const searchOpened = !document.getElementById('search-bar').hidden;
-          target.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ${smokeMod}, shiftKey: true, bubbles: true }));
-          return {
-            searchOpened,
-            paletteOpened: !document.getElementById('command-palette-overlay').hidden
+          const openAndWait = async (id, event) => {
+            target.dispatchEvent(new KeyboardEvent('keydown', event));
+            for (let i = 0; i < 60; i++) {
+              if (!document.getElementById(id).hidden) return true;
+              await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            return !document.getElementById(id).hidden;
           };
+          const searchOpened = await openAndWait('search-bar', { key: 'f', ${smokeMod}, bubbles: true });
+          const paletteOpened = await openAndWait('command-palette-overlay', { key: 'p', ${smokeMod}, shiftKey: true, bubbles: true });
+          return { searchOpened, paletteOpened };
         })()`);
         if (!result.xterm) throw new Error('xterm screen was not created');
         if (!uiChecks.searchOpened) throw new Error('terminal search did not open');
