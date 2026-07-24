@@ -32,6 +32,7 @@
     "smoke:native": "electron scripts/smoke-native.js",
     "smoke:app": "electron . --smoke-test",
     "smoke:tauri": "node scripts/smoke-tauri.js",
+    "perf:tauri": "node scripts/benchmark-tauri.js",
     "perf:pty": "electron scripts/benchmark-pty.js",
     "typecheck": "tsc --noEmit",
     "typecheck:watch": "tsc --noEmit --watch"

@@ -7,12 +7,25 @@ import { WebglAddon } from '../node_modules/@xterm/addon-webgl/lib/addon-webgl.m
 import { SearchAddon } from '../node_modules/@xterm/addon-search/lib/addon-search.mjs';
 import { ShellState, parseOsc7 } from './shell-state.mjs';
 import { normalizeSession, serializeSession } from './session-state.mjs';
-import { filterCommands } from './command-palette.mjs';
 import { consumePromptInput, normalizeHistory } from './command-history.mjs';
 import { appModifier } from './keymap.mjs';
-import './zerolink-cli.js'; // ZeroLinkCLI global'e yuklenir (window.ZeroLinkCLI)
 
-const ZeroLinkCLI = window.ZeroLinkCLI;
+let filterCommands;
+let zeroLinkCliPromise;
+let performanceTest = false;
+let performancePromptReported = false;
+let firstOutputPainted = false;
+let resolveFirstPrompt;
+const firstPromptPainted = new Promise((resolve) => { resolveFirstPrompt = resolve; });
+
+async function loadCommandPalette() {
+  if (!filterCommands) ({ filterCommands } = await import('./command-palette.mjs'));
+}
+
+function loadZeroLinkCli() {
+  zeroLinkCliPromise ||= import('./zerolink-cli.js').then(() => window.ZeroLinkCLI);
+  return zeroLinkCliPromise;
+}
 
 // ── ZeroLink global durum (tum sekmeler arasi paylasilan) — tek kaynak of truth ──
 const zlState = {
@@ -532,6 +545,19 @@ const tabs = new Map(); // tabId -> { term, fitAddon, unsubData, unsubExit, tabE
 let sessionSaveTimer = null;
 let restoringSession = false;
 
+async function initializeZeroLinkForRecord(rec) {
+  if (rec.zlCli) return rec.zlCli;
+  const ZeroLinkCLI = await loadZeroLinkCli();
+  if (!tabs.has(rec.tabId)) return null;
+  rec.zlCli = new ZeroLinkCLI({
+    term: rec.term,
+    tabId: rec.tabId,
+    termAPI: window.termAPI,
+    getZlState: () => zlState,
+  });
+  return rec.zlCli;
+}
+
 function scheduleSessionSave() {
   if (restoringSession) return;
   clearTimeout(sessionSaveTimer);
@@ -637,6 +663,7 @@ function executePaletteCommand(command) {
 }
 
 async function openCommandPalette() {
+  await loadCommandPalette();
   const P = paletteText();
   commandPaletteInputEl.placeholder = P.placeholder;
   commandPaletteEmptyEl.textContent = P.empty;
@@ -957,7 +984,7 @@ async function createTab(profileKey = 'default', cwd = null) {
   }
 
   // Kayit
-  const rec = { term, fitAddon, searchAddon, webglAddon, tabEl, paneEl, title: 'Terminal', shellName: 'Terminal', profileKey, shellState: new ShellState(), inputBuffer: '', currentCommand: null };
+  const rec = { tabId, term, fitAddon, searchAddon, webglAddon, tabEl, paneEl, title: 'Terminal', shellName: 'Terminal', profileKey, shellState: new ShellState(), inputBuffer: '', currentCommand: null };
   rec.shellState.cwdChanged(cwd);
   tabs.set(tabId, rec);
 
@@ -977,6 +1004,7 @@ async function createTab(profileKey = 'default', cwd = null) {
     return true;
   });
   term.parser.registerOscHandler(133, (data) => {
+    if (String(data).startsWith('A')) rec.promptMarkerSeen = true;
     const state = rec.shellState.osc133(data);
     updateShellState(state);
     if (String(data).startsWith('D') && rec.currentCommand) {
@@ -1078,7 +1106,21 @@ async function createTab(profileKey = 'default', cwd = null) {
 
   // Subscribe before spawn so a fast shell cannot lose its initial prompt,
   // banner, or immediate exit event between createPty() and listener setup.
-  rec.unsubData = window.termAPI.onPtyData(tabId, (data) => term.write(data));
+  rec.unsubData = window.termAPI.onPtyData(tabId, (data) => term.write(data, () => {
+    if (!firstOutputPainted) {
+      firstOutputPainted = true;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        resolveFirstPrompt();
+      }));
+    }
+    // Integrated shells identify prompt readiness with OSC 133. Windows PowerShell
+    // has no launch hook yet, and its first PTY write is the initial prompt.
+    const promptReady = rec.promptMarkerSeen || rec.profileKey === 'powershell';
+    if (performanceTest && promptReady && !performancePromptReported) {
+      performancePromptReported = true;
+      requestAnimationFrame(() => requestAnimationFrame(() => reportInteractivePrompt(rec)));
+    }
+  }));
   rec.unsubExit = window.termAPI.onPtyExit(tabId, (code) => {
     term.writeln(`\r\n\x1b[90m${t('exited')(code)}\x1b[0m`);
   });
@@ -1100,20 +1142,11 @@ async function createTab(profileKey = 'default', cwd = null) {
     setTabTitle(tabId, shellInfo.shellName);
   }
 
-  // ---- ZeroLink CLI — 'zl' komut yakalayici + client yonlendirmesi ----
-  const zlCli = new ZeroLinkCLI({
-    term,
-    tabId,
-    termAPI: window.termAPI,
-    getZlState: () => zlState,
-  });
-  rec.zlCli = zlCli;
-
   function handleInput(data) { handleTerminalInput(rec, data); }
   term.onData((data) => {
     handleInput(data);
     // Client modunda girdi uzak PTY'ye; degilse (intercept degilse) yerel PTY'ye
-    const passThrough = zlCli.handleData(data);
+    const passThrough = rec.zlCli ? rec.zlCli.handleData(data) : true;
     if (passThrough) window.termAPI.writePty(tabId, data);
   });
   term.onResize(({ cols, rows }) => {
@@ -1138,6 +1171,7 @@ async function createTab(profileKey = 'default', cwd = null) {
   // Session restore sırasında focus kaçırma (flicker önleme)
   if (!restoringSession) term.focus();
   scheduleSessionSave();
+  return tabId;
 }
 
 function setTabTitle(tabId, rawTitle) {
@@ -1271,7 +1305,12 @@ const shellSelectEl = document.getElementById('set-shell');
 function toggleSettings() {
   overlayEl.hidden ? openSettings() : closeSettings();
 }
+let settingsUiBuilt = false;
 function openSettings() {
+  if (!settingsUiBuilt) {
+    buildSettingsUI();
+    settingsUiBuilt = true;
+  }
   syncSettingsUI();
   overlayEl.hidden = false;
   try { _ncRefreshAccount?.(); } catch (_) {} // CLI'da giriş yapılmış olabilir → tazele
@@ -1461,7 +1500,8 @@ const zlOverlayEl = document.getElementById('zl-overlay');
 const zlL = () => LANGS[settings.lang] || LANGS.en;
 
 function toggleZeroLink() { zlOverlayEl.hidden ? openZeroLink() : closeZeroLink(); }
-function openZeroLink() {
+async function openZeroLink() {
+  await Promise.all([...tabs.values()].map(initializeZeroLinkForRecord));
   zlResetToModeSelect();
   if (window.__TAURI_INTERNALS__) {
     document.getElementById('zl-mode-select').hidden = true;
@@ -1909,8 +1949,6 @@ const _ncRefreshAccount = (() => {
       if (s && s.loggedIn) showLoggedIn(s.email); else showLoggedOut();
     } catch (_) { showLoggedOut(); }
   }
-  refresh();
-
   $('nc-acc-sendcode')?.addEventListener('click', async () => {
     const email = ($('nc-acc-email').value || '').trim();
     if (!/.+@.+\..+/.test(email)) { setStatus(L().accBadEmail || 'Enter a valid email', 'err'); return; }
@@ -1946,19 +1984,70 @@ const _ncRefreshAccount = (() => {
   return refresh;
 })();
 
-// Gomulu fontu xterm ilk olcumden ONCE yukle (yoksa glyph metrigi kayar), sonra ilk sekme.
+async function measureInputCommit(rec, count = 100) {
+  const target = rec.paneEl.querySelector('textarea') || rec.paneEl;
+  const samples = [];
+  for (let index = 0; index < count; index += 1) {
+    const elapsed = await new Promise((resolve) => {
+      const onKeydown = (event) => {
+        event.preventDefault();
+        const startedAt = performance.now();
+        rec.term.write('', () => resolve(performance.now() - startedAt));
+      };
+      target.addEventListener('keydown', onKeydown, { once: true, capture: true });
+      target.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'a',
+        code: 'KeyA',
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+    samples.push(elapsed);
+  }
+  return samples;
+}
+
+async function reportInteractivePrompt(rec) {
+  await window.termAPI.reportPerformance('prompt', {
+    renderer: rec.webglAddon ? 'webgl' : 'dom',
+  });
+  const samples = await measureInputCommit(rec);
+  await window.termAPI.reportPerformance('input', { samples });
+  const scheduleIdle = window.requestIdleCallback || ((callback) => setTimeout(callback, 0));
+  scheduleIdle(() => initializeZeroLinkForRecord(rec).catch((error) => {
+    console.warn('ZeroLink lazy preload failed:', error);
+  }));
+}
+
 async function boot() {
   document.body.classList.toggle('platform-tauri', isTauri);
-  try {
-    const caps = await window.termAPI.getCaps();
+  const fontReady = Promise.all([
+    document.fonts.load('400 13px "JetBrains Mono"'),
+    document.fonts.load('700 13px "JetBrains Mono"'),
+    document.fonts.load('italic 400 13px "JetBrains Mono"'),
+    document.fonts.ready,
+  ]).catch(() => {});
+  const [capsResult, settingsResult, bootResult, sessionResult] = await Promise.allSettled([
+    window.termAPI.getCaps(),
+    window.termAPI.getSettings(),
+    window.termAPI.getBootContext(),
+    window.termAPI.getSession(),
+  ]);
+  if (capsResult.status === 'fulfilled') {
+    const caps = capsResult.value;
     isMac = caps?.platform === 'darwin';
     document.body.classList.toggle('platform-mac', isMac);
-  } catch (_) { /* platform sinifi zorunlu degil */ }
-  try {
-    const saved = await window.termAPI.getSettings();
+  }
+  if (settingsResult.status === 'fulfilled') {
+    const saved = settingsResult.value;
     settings = { ...DEFAULT_SETTINGS, ...saved };
     if (!THEMES[settings.profile]) settings.profile = 'pro';
-  } catch (_) { /* ayar okunamazsa varsayilanlar */ }
+  }
+  const bootContext = bootResult.status === 'fulfilled' ? bootResult.value : {};
+  const session = normalizeSession(sessionResult.status === 'fulfilled'
+    ? sessionResult.value
+    : { tabs: [], activeIndex: 0 });
+  performanceTest = bootContext?.performanceTest === true;
 
   // Dil: kayitli tercih yoksa sistem dilinden sec (tr → Turkce, digerleri → Ingilizce)
   if (!settings.lang) {
@@ -1966,44 +2055,57 @@ async function boot() {
   }
   applyLanguage();
 
-  buildSettingsUI();
   // Krom rengini ilk sekme acilmadan uygula (acik temada koyu flash olmasin);
   // save=false → diske geri yazmaya gerek yok.
   applySettings({ save: false });
 
-  try {
-    await Promise.all([
-      document.fonts.load('400 13px "JetBrains Mono"'),
-      document.fonts.load('700 13px "JetBrains Mono"'),
-      document.fonts.load('italic 400 13px "JetBrains Mono"'),
-    ]);
-    await document.fonts.ready;
-  } catch (_) { /* font yuklenemezse sistem mono'suna duser */ }
-  let bootContext = {};
-  let session = { tabs: [], activeIndex: 0 };
-  try {
-    [bootContext, session] = await Promise.all([window.termAPI.getBootContext(), window.termAPI.getSession()]);
-    session = normalizeSession(session);
-  } catch (_) { /* bos oturumla devam */ }
-
-  if (bootContext?.cwd) {
+  if (performanceTest) {
+    await createTab(isTauri && navigator.platform.startsWith('Win') ? 'powershell' : 'default');
+  } else if (bootContext?.cwd) {
     await createTab('default', bootContext.cwd);
   } else if (session.tabs.length) {
     restoringSession = true;
-    for (const tab of session.tabs) {
-      await createTab(tab.profileKey, tab.cwd);
+    const restoredIds = new Array(session.tabs.length);
+    const restoreTab = async (index) => {
+      const tab = session.tabs[index];
+      const rootId = await createTab(tab.profileKey, tab.cwd);
+      restoredIds[index] = rootId;
       if (tab.split) await splitActive(tab.split.direction, tab.split);
+    };
+    const savedIndex = Math.min(session.activeIndex, session.tabs.length - 1);
+    await restoreTab(savedIndex);
+    await Promise.race([
+      firstPromptPainted,
+      new Promise((resolve) => setTimeout(resolve, 1000)),
+    ]);
+    for (let index = 0; index < session.tabs.length; index += 1) {
+      if (index !== savedIndex) await restoreTab(index);
     }
-    const restoredId = rootTabIds()[session.activeIndex];
+    for (const rootId of restoredIds) {
+      const root = tabs.get(rootId);
+      if (!root) continue;
+      tabbarEl.appendChild(root.tabEl);
+      panesEl.appendChild(root.splitGroup || root.paneEl);
+    }
+    const restoredId = restoredIds[savedIndex];
     if (restoredId) activateTab(restoredId);
     restoringSession = false;
     scheduleSessionSave();
   } else {
     await createTab();
   }
+  fontReady.then(() => {
+    for (const rec of tabs.values()) rec.fitAddon.fit();
+  });
 
   if (bootContext?.smokeTest && typeof window.termAPI.completeSmokeTest === 'function') {
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    openSettings();
+    const settingsLoaded = profileGridEl.querySelectorAll('.profile-card').length === Object.keys(THEMES).length;
+    closeSettings();
+    await openCommandPalette();
+    const paletteLoaded = !commandPaletteOverlayEl.hidden && commandPaletteListEl.children.length > 0;
+    closeCommandPalette();
     const theme = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
     await window.termAPI.completeSmokeTest({
       xterm: !!document.querySelector('.xterm-screen'),
@@ -2011,7 +2113,18 @@ async function boot() {
       terminalCount: document.querySelectorAll('.xterm').length,
       liveCount: document.querySelectorAll('.tab[data-cwd]').length,
       theme,
+      settingsLoaded,
+      paletteLoaded,
     });
+  }
+
+  if (!performanceTest) {
+    const scheduleIdle = window.requestIdleCallback || ((callback) => setTimeout(callback, 0));
+    requestAnimationFrame(() => requestAnimationFrame(() => scheduleIdle(() => {
+      Promise.all([...tabs.values()].map(initializeZeroLinkForRecord)).catch((error) => {
+        console.warn('ZeroLink lazy preload failed:', error);
+      });
+    })));
   }
 }
 boot();

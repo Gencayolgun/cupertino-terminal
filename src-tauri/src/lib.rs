@@ -15,6 +15,7 @@ mod app {
     use serde_json::{json, Map, Value};
     use std::{
         env, fs,
+        io::{self, Write},
         path::{Path, PathBuf},
         sync::Mutex,
         time::Duration,
@@ -31,6 +32,7 @@ mod app {
     struct BootState {
         cwd: Mutex<Option<PathBuf>>,
         smoke_test: bool,
+        performance_test: bool,
     }
 
     fn read_store(path: &Path) -> Map<String, Value> {
@@ -163,7 +165,11 @@ mod app {
             .unwrap_or_else(|error| error.into_inner())
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned());
-        json!({ "cwd": cwd, "smokeTest": state.smoke_test })
+        json!({
+            "cwd": cwd,
+            "smokeTest": state.smoke_test,
+            "performanceTest": state.performance_test
+        })
     }
 
     #[tauri::command]
@@ -273,19 +279,48 @@ mod app {
             .get("theme")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        if !xterm || tab_count == 0 || terminal_count == 0 || live_count == 0 || theme.is_empty() {
+        let settings_loaded = result
+            .get("settingsLoaded")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let palette_loaded = result
+            .get("paletteLoaded")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if !xterm
+            || tab_count == 0
+            || terminal_count == 0
+            || live_count == 0
+            || theme.is_empty()
+            || !settings_loaded
+            || !palette_loaded
+        {
             let message = format!(
-                "Tauri smoke test failed: xterm={xterm}, tabs={tab_count}, terminals={terminal_count}, live={live_count}, theme={theme:?}"
+                "Tauri smoke test failed: xterm={xterm}, tabs={tab_count}, terminals={terminal_count}, live={live_count}, theme={theme:?}, settings={settings_loaded}, palette={palette_loaded}"
             );
             eprintln!("{message}");
             app.exit(1);
             return Err(message);
         }
         println!(
-            "Tauri smoke test passed (xterm present, {tab_count} tab, {terminal_count} terminal, live PTY, theme {theme})"
+            "Tauri smoke test passed (xterm present, {tab_count} tab, {terminal_count} terminal, live PTY, theme {theme}, lazy settings + palette)"
         );
         app.exit(0);
         Ok(())
+    }
+
+    #[tauri::command]
+    fn report_performance(
+        kind: String,
+        result: Value,
+        state: State<'_, BootState>,
+    ) -> Result<(), String> {
+        if !state.performance_test {
+            return Err("performance reporting is only available in benchmark mode".into());
+        }
+        let message = json!({ "kind": kind, "result": result });
+        println!("TAURI_PERF {}", message);
+        io::stdout().flush().map_err(|error| error.to_string())
     }
 
     fn canonical_directory(path: impl AsRef<Path>) -> Option<PathBuf> {
@@ -417,6 +452,7 @@ mod app {
 
     pub fn run() {
         let smoke_test = env::args().any(|argument| argument == "--smoke-test");
+        let performance_test = env::args().any(|argument| argument == "--performance-test");
         let initial_args: Vec<String> = env::args().collect();
         let initial_cwd = env::current_dir().ok();
         let launch_directory = directory_from_launch(&initial_args, initial_cwd.as_deref());
@@ -462,12 +498,13 @@ mod app {
                 app.manage(BootState {
                     cwd: Mutex::new(launch_directory),
                     smoke_test,
+                    performance_test,
                 });
                 app.manage(AccountService::from_environment());
                 app.manage(ZeroLinkState::default());
                 let pty_state = PtyState::new(data_dir);
                 if let Some(window) = app.get_webview_window("main") {
-                    if smoke_test {
+                    if smoke_test || performance_test {
                         let _ = window.hide();
                     }
                     let close_state = pty_state.clone();
@@ -500,7 +537,7 @@ mod app {
                 #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
                 app.deep_link().register_all()?;
 
-                if smoke_test {
+                if smoke_test || performance_test {
                     let handle = app.handle().clone();
                     std::thread::spawn(move || {
                         std::thread::sleep(Duration::from_secs(20));
@@ -536,6 +573,7 @@ mod app {
                 nc_account_password,
                 nc_account_logout,
                 complete_smoke_test,
+                report_performance,
                 zerolink::zl_host_start,
                 zerolink::zl_host_stop,
                 zerolink::zl_client_connect,

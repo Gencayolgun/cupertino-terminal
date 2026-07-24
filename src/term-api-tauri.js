@@ -180,6 +180,7 @@ window.termAPI = Object.freeze({
   onSmokeCommand: (callback) => tauriEventSubscription('app:smoke-command', callback),
 
   completeSmokeTest: (result) => invoke('complete_smoke_test', { result }),
+  reportPerformance: (kind, result) => invoke('report_performance', { kind, result }),
 
   zlHostStart: (tabId) => invoke('zl_host_start', { tabId }),
   zlHostStop: () => invoke('zl_host_stop').catch((error) => console.warn(error)),
